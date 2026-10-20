@@ -49,7 +49,7 @@ with sync_playwright() as p:
   s=wait_for(lambda s:s['revision']==s['syncedRevision'],75)
   index=json.loads((data_dir/'sync.json').read_text())
   backed_up=[entry for month in index['months'] for entry in json.loads((data_dir/(month+'.json')).read_text())['entries']]
-  for eid in created:assert sum(e['device']==s['device'] and e['id']==eid for e in backed_up)==1
+  for eid in created:assert sum(e['actor']==s['device'] and not e.get('deleted',False) and e['id']==eid for e in backed_up)==1
   print('PASS: mDNS/automatic retry uploads pending records after computer service returns',flush=True)
  finally:
   service('start')

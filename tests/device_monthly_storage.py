@@ -21,7 +21,7 @@ with sync_playwright() as p:
         raise AssertionError(current['status'])
     def records(month):
         path = data_dir / (month + '.json')
-        return json.loads(path.read_text())['entries'] if path.exists() else []
+        return [e for e in json.loads(path.read_text())['entries'] if not e.get('deleted',False)] if path.exists() else []
     initial = state()['entries']
     entry = {'id': str(uuid.uuid4()), 'amount': 1, 'at': '2026-10-20T12:00',
              'category': 'giving', 'note': '按月存储临时验证'}

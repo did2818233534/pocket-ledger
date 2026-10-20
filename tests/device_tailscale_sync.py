@@ -31,7 +31,7 @@ with sync_playwright() as p:
     def backed_up():
         return wait(lambda s:s['revision']==s['syncedRevision'] and s['lastRoute']=='Tailscale')
     def disk_entries():
-        return [e for file in root.glob('????-??.json') for e in json.loads(file.read_text())['entries']]
+        return [e for file in root.glob('????-??.json') for e in json.loads(file.read_text())['entries'] if not e.get('deleted',False)]
     def restart_with_lan(host):
         # Stop the app before updating only its connection preferences, so mDNS
         # cannot race this simulated off-LAN setup. Pairing secrets stay in memory.

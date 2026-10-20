@@ -52,7 +52,7 @@ public class SyncService extends Service {
         String key=p.getString("key","");
         if(key.isEmpty()){if(!quiet)p.edit().putString("status","请先配对电脑").apply();return;}
         try {
-            JSONObject snapshot=LedgerDb.get(c).snapshot();
+            JSONObject snapshot=LedgerDb.get(c).syncSnapshot();
             String body=snapshot.toString(), timestamp=Long.toString(System.currentTimeMillis()/1000);
             String signature=sign(key,timestamp+"\n"+body),route="局域网";
             JSONObject response;
@@ -66,8 +66,9 @@ public class SyncService extends Service {
                 verify(response,key,timestamp,snapshot.getLong("revision"));
                 route="Tailscale";
             }
+            LedgerDb.get(c).merge(new JSONObject(response.getString("body")));
             p.edit().putLong("lastSync",System.currentTimeMillis()).putLong("syncedRevision",snapshot.getLong("revision"))
-                .putString("lastRoute",route).putString("status","已通过"+route+"同步到电脑").apply();
+                .putString("lastRoute",route).putString("status","已通过"+route+"合并账本").apply();
         } catch(Exception e) {
             String message=e.getMessage();
             if(e instanceof java.io.IOException)message="电脑暂时离线，账目已保存在手机";
@@ -126,7 +127,7 @@ public class SyncService extends Service {
             try (java.io.InputStream in = conn.getInputStream(); java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
                 byte[] buffer = new byte[1024]; int n;
                 while ((n=in.read(buffer))!=-1) {
-                    if (out.size()+n>4096) throw new Exception("电脑响应过大");
+                    if (out.size()+n>4*1024*1024) throw new Exception("电脑响应过大");
                     out.write(buffer,0,n);
                 }
                 reply = out.toString("UTF-8");

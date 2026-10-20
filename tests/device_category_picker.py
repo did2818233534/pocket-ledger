@@ -40,7 +40,7 @@ with sync_playwright() as p:
   s=synced();eid=next(e['id'] for e in s['entries'] if e['note']==marker)
   index=json.loads((data_dir/'sync.json').read_text())
   backed_up=[entry for month in index['months'] for entry in json.loads((data_dir/(month+'.json')).read_text())['entries']]
-  assert any(e['device']==s['device'] and e['id']==eid and e['category']=='giving' and e['amount']==1 for e in backed_up)
+  assert any(e['actor']==s['device'] and not e.get('deleted',False) and e['id']==eid and e['category']=='giving' and e['amount']==1 for e in backed_up)
   page.locator(f'[data-edit="{eid}"]').click()
   assert page.locator('#category-name').inner_text()=='借出赠与'
   page.locator('#cancel').click()

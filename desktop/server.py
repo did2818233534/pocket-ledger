@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phone-authoritative LAN backup server. mDNS discovery via python-zeroconf."""
+"""Shared offline ledger sync server with durable monthly JSON storage."""
 import argparse
 import datetime as dt
 import hashlib
@@ -20,6 +20,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+USER_IDS = ("00000000-0000-4000-8000-000000000001",)
 PORT = 47831
 MAX_BODY = 4 * 1024 * 1024
 
@@ -134,6 +135,8 @@ class Store:
             months.setdefault(month, []).append(entry)
         transaction = {"format": 1, "months": months,
             "index": {"format": 2, "devices": data["devices"], "months": sorted(months)}}
+        if "users" in data:
+            transaction["index"].update(users=data["users"], legacyDevices=data.get("legacyDevices", []))
         # Durably record the complete operation before touching any monthly file.
         self._atomic_write(self.pending, transaction)
         self._recover()
@@ -177,9 +180,111 @@ class Store:
                 entries.extend(shard["entries"])
             entries.sort(key=lambda entry: entry["at"], reverse=True)
             # Keep the existing combined export/API format for callers.
-            return {"format": 1, "devices": index["devices"], "entries": entries}
+            result = {"format": 1, "devices": index["devices"], "entries": entries}
+            if "users" in index:
+                result.update(users=index["users"], legacyDevices=index.get("legacyDevices", []), protocol=2)
+            return result
 
     def accept(self, data):
+        if not isinstance(data, dict):
+            raise ValueError("invalid sync object")
+        if data.get("protocol") == 2:
+            return self.merge(data)
+        with self.lock:
+            if "users" in self.export():
+                raise ValueError("Upgrade client to shared ledger version")
+            return self.accept_legacy(data)
+
+    @staticmethod
+    def stamp(row):
+        version = row["version"]
+        if type(version) is not int or not 1 <= version < 2**53 - 1:
+            raise ValueError("invalid version")
+        actor = str(uuid.UUID(row["actor"]))
+        if actor != row["actor"]:
+            raise ValueError("noncanonical actor")
+        return version, actor
+
+    def merge(self, data):
+        device = str(uuid.UUID(data["device"]))
+        revision = data["revision"]
+        if type(revision) is not int or not 0 <= revision < 2**53 - 1:
+            raise ValueError("invalid revision")
+        users, records = data["users"], data["records"]
+        if not isinstance(users, list) or not 1 <= len(users) <= 1000:
+            raise ValueError("invalid users")
+        clean_users, user_ids = [], set()
+        for u in users:
+            uid = str(uuid.UUID(u["id"]))
+            if uid != u["id"] or uid in user_ids:
+                raise ValueError("invalid user id")
+            user_ids.add(uid)
+            self.stamp(u)
+            if not isinstance(u["name"], str) or not 1 <= len(u["name"].strip()) <= 24:
+                raise ValueError("invalid user name")
+            clean_users.append({k: u[k] for k in ("id", "name", "version", "actor")})
+        if not isinstance(records, list) or len(records) > 100000:
+            raise ValueError("invalid records")
+        rows, seen = [], set()
+        for e in records:
+            self.stamp(e)
+            eid = str(uuid.UUID(e["id"]))
+            if eid != e["id"] or eid in seen or e["owner"] not in user_ids or type(e["deleted"]) is not bool:
+                raise ValueError("invalid record")
+            seen.add(eid)
+            amount, when = e["amount"], e["at"]
+            if type(amount) is not int or not 1 <= amount <= 99999999999:
+                raise ValueError("invalid amount")
+            parsed = dt.datetime.fromisoformat(when)
+            if parsed.tzinfo is not None or "T" not in when or not self._valid_month(when[:7]):
+                raise ValueError("invalid date")
+            if e["category"] not in ("daily", "extra", "claim", "giving") or not isinstance(e["note"], str) or len(e["note"]) > 200:
+                raise ValueError("invalid details")
+            rows.append({k: e[k] for k in ("id", "amount", "at", "category", "note", "owner", "version", "actor", "deleted")})
+        with self.lock:
+            stored = self.export()
+            if "users" not in stored:
+                stored["users"] = [{"id": uid, "name": name, "version": 1, "actor": USER_IDS[0]}
+                                   for uid, name in zip(USER_IDS, ("用户一",))]
+                stored["legacyDevices"] = [d["id"] for d in stored["devices"]]
+                for e in stored["entries"]:
+                    e.update(owner=USER_IDS[0], version=1, actor=e["device"], deleted=False)
+            # Upgrade a device's old snapshot exactly once, including deletions made offline before upgrade.
+            if device in stored["legacyDevices"]:
+                previous = next(d for d in stored["devices"] if d["id"] == device)
+                if revision < previous["revision"]:
+                    raise ValueError("stale migration")
+                for e in stored["entries"]:
+                    if e.get("device") == device and e["id"] not in seen and e["version"] == 1:
+                        e.update(deleted=True, version=2, actor=device)
+                stored["legacyDevices"].remove(device)
+            merged = {e["id"]: e for e in stored["entries"]}
+            for e in rows:
+                old = merged.get(e["id"])
+                if old is None or self.stamp(e) > self.stamp(old):
+                    merged[e["id"]] = e
+                elif self.stamp(e) == self.stamp(old) and any(e[k] != old[k] for k in e):
+                    raise ValueError("conflicting mutation identity")
+            profiles = {u["id"]: u for u in stored["users"]}
+            for u in clean_users:
+                old = profiles.get(u["id"])
+                if old is None or self.stamp(u) > self.stamp(old):
+                    profiles[u["id"]] = u
+                elif self.stamp(u) == self.stamp(old) and u != old:
+                    raise ValueError("conflicting user mutation")
+            stored["entries"] = sorted(merged.values(), key=lambda e: (e["at"], e["id"]), reverse=True)
+            stored["users"] = [profiles[uid] for uid in sorted(profiles)]
+            if len(profiles) > 1000:
+                raise ValueError("user limit")
+            stored["devices"] = [d for d in stored["devices"] if d["id"] != device] + [
+                {"id": device, "revision": revision, "updated": dt.datetime.now(dt.timezone.utc).isoformat()}]
+            result = {"protocol": 2, "revision": revision, "users": stored["users"], "records": stored["entries"]}
+            if len(json.dumps(result, ensure_ascii=False).encode()) > MAX_BODY:
+                raise ValueError("ledger size limit")
+            self._write(stored)
+            return result
+
+    def accept_legacy(self, data):
         device = str(uuid.UUID(data["device"]))
         revision = data["revision"]
         if type(revision) is not int or not 0 <= revision <= 2**63-1:

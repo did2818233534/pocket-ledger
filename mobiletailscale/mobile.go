@@ -177,11 +177,11 @@ func exchange(host, body, timestamp, signature, path string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 4097))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024+1))
 	if err != nil {
 		return "", err
 	}
-	if len(data) > 4096 {
+	if len(data) > 4*1024*1024 {
 		return "", errors.New("电脑响应过大")
 	}
 	b, err := json.Marshal(map[string]any{"code": resp.StatusCode, "body": string(data), "signature": resp.Header.Get("X-Signature")})
