@@ -1,0 +1,97 @@
+# 小账 · 安卓本地记账
+
+手机原生安装包，使用 Android SQLite 保存账目，内置离线 WebView 界面。电脑 Python 标准库服务只在局域网接收备份，不依赖云端或额外 Python 包。
+
+## 开始使用
+
+1. 安装 `dist/小账-1.0.0.apk`（Android 8.0 及以上）。
+2. 电脑运行 `bash desktop/install-service.sh`，启动服务并开启开机运行。源码与数据库保留在本项目中，使用已有系统 Python，不安装新运行时。用户级 systemd 配置位于 `~/.config/systemd/user/`，`loginctl enable-linger` 使服务无需登录即可启动。
+3. 电脑运行 `python3 desktop/server.py --pair`，查看电脑地址和密钥。
+4. 手机和电脑连接同一局域网，进入“同步”，填入电脑地址、密钥，点击“保存并开启自动同步”。允许通知和后台运行。
+5. 点击“立即同步”确认成功。没有电脑时照常记账，下次连上后自动备份。
+
+如果系统防火墙已经开启，只对可信局域网放行电脑 TCP 47831；手机需要接收 UDP 47832。Wi-Fi AP 隔离、访客网络或 VPN 可能阻止发现。支持 RFC1918 私有 IPv4 局域网，不支持 IPv6-only。
+
+## 界面
+
+- **账本**：本月总额、本周总额、三类支出汇总；按月浏览流水，点击记录修改或删除，右下角记一笔。
+- **统计**：当月、本周、近 7 天、近 30 天切换；属性百分比环形图、每日柱状图、日均和自付金额。点击柱查看日期和金额。
+- **同步**：同步状态、最近成功时间、待同步提示、手动同步、暂停自动同步、电脑配对、JSON 导出。
+
+支出属性：日常生活、额外支出、报销垫付。总支出包括垫付，自付支出排除垫付；“报销垫付”只是属性，不包含报销审批或到账状态。
+
+统计遵循手机本地日历日期，本周从周一开始，滚动范围包含今天。当月、本周显示截至今天的支出，未来日期账目仍保存在对应月份流水中，但未纳入当前统计。日均以范围内全部自然日计算（包含零支出日）。金额以整数分保存。
+
+## 同步约定
+
+手机是唯一编辑端，电脑按设备 ID 保存完整镜像。每次变更递增 revision，电脑事务性接收全量快照；相同版本重复请求幂等，旧版本拒绝，删除会传播。电脑不是双向编辑端。
+
+电脑每 20 秒主动发送签名 UDP 广播，在线手机收到后发起 HTTP 同步；手机同时每 60 秒检查保存的电脑 IP。配对后电脑 IP 改变可通过签名广播重新发现。电脑并不直接读取手机开放端口，而是以主动广播触发手机上传。应用启动、账目修改和手动点击也会触发同步（暂停自动同步时仅手动触发）。
+
+首次配对必须手动输入 IP 和 64 位密钥。密钥不在网络中发送，用 HMAC-SHA256 校验发现消息、请求与响应；发现要求 90 秒以内、请求要求两端时间差 120 秒以内。**HTTP 数据未加密**，只适用于可信家庭局域网。数据与密钥文件受当前用户文件权限保护；手机系统备份关闭。
+
+后台使用 Android `connectedDevice` 前台服务和常驻通知，具备网络设备通信所需的权限。系统省电、Doze、厂商后台限制、强行停止或手机重启会影响定时精度，不能承诺被系统挂起时每分钟执行。重启后打开应用会恢复已开启的同步；没有申请手机开机自启。电脑独立使用 systemd 开机启动。
+
+一份请求最大 4 MiB，超过时显示失败并保留手机数据。同步副本不是历史归档，删除会覆盖副本，请定期导出 JSON；当前不提供 JSON 导入/恢复界面。卸载手机应用会删除本地数据库，卸载前应导出备份。
+
+## 电脑数据与运维
+
+```bash
+python3 desktop/server.py --pair
+systemctl --user status pocket-ledger
+journalctl --user -u pocket-ledger
+python3 desktop/server.py --export /绝对路径/账本备份.json
+systemctl --user stop pocket-ledger
+systemctl --user disable --now pocket-ledger
+```
+
+数据库：`desktop/data/ledger.sqlite3`；密钥：`desktop/data/config.json`。不要删除或公开密钥文件。多台手机按设备隔离保存。
+
+## 开发和验证
+
+```bash
+# 不需要下载 Gradle 依赖的直接构建（已验证）
+bash build-apk.sh
+
+# 常规 Gradle 构建
+GRADLE_USER_HOME=/opt/gradle-cache JAVA_HOME=/opt/android-studio/jbr \
+  /opt/gradle/bin/gradle assembleDebug lintDebug --no-daemon
+python3 -m unittest discover -s tests -v
+node --test tests/model.test.js
+```
+
+开发依赖沿用 `/opt/android-sdk`、`/opt/gradle` 和 `/opt/gradle-cache`。当前交付为调试签名 APK，适合本人侧载；正式长期发行应使用独立保存的发行签名，以保证后续升级兼容。
+
+布局参考 [Money Lover](https://moneylover.me/) 的流水、分类报表和独立报告页结构，使用原创中文界面和配色，没有复制品牌素材。安卓服务限制参考 [Android foreground services](https://developer.android.com/develop/background-work/services/fgs)。
+
+## 本次交付验证
+
+- Python 同步服务测试 4 项、JavaScript 金额与日期测试 3 项通过。
+- Android 15 模拟器真实安装：记账、修改、删除、SQLite 重载、四个统计范围、图表点击、配对与签名同步、离线新增和手动恢复均通过，页面无 JavaScript 错误。
+- 签名 UDP 探测成功更新电脑 IP 并触发同步；停止测试服务器后新增记录，重启服务器约 57 秒后由手机自动重试成功。
+- 直接 SDK 构建、APK 签名校验通过；Gradle APK 打包也完成。Lint 由于缓存缺少 `intellij-core-31.9.2.jar` 与 `kotlin-compiler-31.9.2.jar` 未完成，未宣称静态检查全部通过。
+- `dist/账本.png`、`dist/统计.png`、`dist/同步.png` 是模拟器测试截图，包含演示数据；APK 不内置演示账目，正式电脑数据库为空。
+- 本机 systemd 用户服务已启动并启用，guga 的 linger 已开启。未重启整台电脑测试；已验证服务状态为 active/enabled。模拟器、端口转发与临时测试服务均已清理。
+- 初次交付仅验证模拟器；后续实体手机验证结果见下文，长时间休眠及厂商省电策略仍需实际观察。
+
+### 实体手机调试与底部适配修复
+
+已在 Android 15 实体手机上通过 USB 覆盖安装并完成局域网配对。实际验证了记账、四种统计、SQLite 保存、手机到电脑同步和测试记录删除传播。修复了系统手势区域的深色背景及菜单文字遮挡：由原来的 WebView padding 改为原生容器的系统栏/键盘 insets 布局，并采用浅色导航栏。测试记录均按专用 ID 清理，保留用户账目。
+
+实体手机退至后台后约 41 秒出现新的成功同步，前台同步服务运行正常。调试结束只移除 ADB 转发、结束本次 ADB 进程及清理临时测试文件；手机应用和电脑正式服务均保留。
+
+## 返回操作
+
+- 键盘显示时，先收起键盘，不关闭编辑页。
+- 记账编辑页返回到原页面；有未保存修改时，确认放弃才关闭。“取消”按钮采用同样的保护。
+- 统计、同步页面返回账本；同步连接设置有未保存输入时先确认。
+- 账本首页返回时显示“留在小账 / 返回桌面”，不会直接退出。确认返回桌面后，已开启的同步继续运行。
+- Android 13 及以上使用系统返回回调，旧版本使用传统返回回调。
+
+## Git 仓库
+
+远程地址：`git@github.com:did2818233534/pocket-ledger.git`，默认分支 `main`。
+
+源码位于 `/home/guga/myself/project/pocket-ledger`。`.gitignore` 排除构建缓存、APK、演示截图、IDE 配置、数据库、电脑配对配置和签名文件。电脑运行数据保留在 `desktop/data/`，不提交 Git。克隆后需配置自己的 Android SDK 路径和签名密钥；`build-apk.sh` 中的默认工具路径适用于本机。
+
+返回逻辑已在 Android 15 实体手机验证：子页面返回账本、首页退出确认、先关闭键盘、取消放弃后保留输入、确认放弃后关闭编辑页，以及空白编辑页返回。验证前后现有账目完全一致。测试脚本：`tests/device_back_navigation.py`（需设置 `ANDROID_SERIAL`，手机解锁并停留账本首页，WebView 调试端口转发到 9228）。
