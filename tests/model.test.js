@@ -45,3 +45,11 @@ test('calculator respects precedence, nested brackets and exact final rounding',
 test('calculator rejects malformed, unsafe, zero, negative and overflowing amounts',()=>{
  for(const expression of ['', '1+', '(2+3', '2(3)', '1/0', '1/(2-2)', '-2', '0.001', '1000000000', '1e3', 'alert(1)', '2**3', '1 2', '1'.repeat(121)])assert.throws(()=>M.calculateAmount(expression),expression);
 });
+test('note charts merge identical names across categories and parent notes within the selected period',()=>{
+ const rows=[{at:'2026-10-20T12:00',amount:100,category:'daily',primaryNote:'吃饭',note:'面'},{at:'2026-10-20T13:00',amount:200,category:'extra',primaryNote:'吃饭',note:'面'},{at:'2026-10-20T14:00',amount:400,category:'claim',primaryNote:'出差',note:'面'},{at:'2026-10-20T15:00',amount:50,category:'giving',note:''},{at:'2026-09-01T12:00',amount:999,category:'daily',primaryNote:'吃饭',note:'面'}];
+ const now=new Date(2026,9,20);
+ assert.equal(M.breakdown(rows,'month','primaryNote',now).find(g=>g.key==='吃饭').amount,300);
+ assert.equal(M.breakdown(rows,'month','note',now).find(g=>g.key==='面').amount,700);
+ assert.equal(M.breakdown(rows,'month','note',now).find(g=>g.key==='').amount,50);
+ assert.equal(M.breakdown(rows.slice(0,1),'month','note',now)[0].amount,100);
+});

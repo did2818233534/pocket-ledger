@@ -278,7 +278,12 @@ class Store:
                 raise ValueError("invalid date")
             if e["category"] not in ("daily", "extra", "claim", "giving") or not isinstance(e["note"], str) or len(e["note"]) > 200:
                 raise ValueError("invalid details")
-            rows.append({k: e[k] for k in ("id", "amount", "at", "category", "note", "owner", "version", "actor", "deleted")})
+            if "primaryNote" in e and (not isinstance(e["primaryNote"], str) or len(e["primaryNote"]) > 60):
+                raise ValueError("invalid primary note")
+            row = {k: e[k] for k in ("id", "amount", "at", "category", "note", "owner", "version", "actor", "deleted")}
+            if "primaryNote" in e:
+                row["primaryNote"] = e["primaryNote"]
+            rows.append(row)
         with self.lock:
             stored = self.export()
             if "users" not in stored:
@@ -299,9 +304,10 @@ class Store:
             merged = {e["id"]: e for e in stored["entries"]}
             for e in rows:
                 old = merged.get(e["id"])
+                e.setdefault("primaryNote", (old or {}).get("primaryNote", ""))
                 if old is None or self.stamp(e) > self.stamp(old):
                     merged[e["id"]] = e
-                elif self.stamp(e) == self.stamp(old) and any(e[k] != old[k] for k in e):
+                elif self.stamp(e) == self.stamp(old) and any(e[k] != old.get(k, "") for k in e):
                     raise ValueError("conflicting mutation identity")
             profiles = {u["id"]: {"id":u["id"],"name":u["name"],"nameAt":u.get("nameAt",0),
                                    "avatar":u.get("avatar",""),"avatarAt":u.get("avatarAt",0)} for u in stored["users"]}

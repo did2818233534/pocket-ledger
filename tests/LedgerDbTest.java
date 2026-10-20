@@ -22,7 +22,7 @@ public final class LedgerDbTest {
         Constructor<LedgerDb> ctor=LedgerDb.class.getDeclaredConstructor(Context.class);ctor.setAccessible(true);return ctor.newInstance(context);
     }
     static void clean(){for(String suffix:new String[]{"","-wal","-shm","-journal"})new File(PATH+suffix).delete();}
-    static JSONObject entry(String owner)throws Exception{return new JSONObject().put("id",UUID.randomUUID().toString()).put("owner",owner).put("amount",123).put("at","2026-10-20T12:00").put("category","daily").put("note","isolated test");}
+    static JSONObject entry(String owner)throws Exception{return new JSONObject().put("id",UUID.randomUUID().toString()).put("owner",owner).put("amount",123).put("at","2026-10-20T12:00").put("category","daily").put("note","isolated test").put("primaryNote","吃饭");}
     public static void main(String[] args)throws Exception {
         clean();LedgerDb db=null;
         try {
@@ -30,6 +30,7 @@ public final class LedgerDbTest {
             check(state.getJSONArray("users").length()==3,"third user created");
             JSONObject row=entry(owner);db.save(row.toString());JSONObject packet=db.syncSnapshot();
             JSONObject remote=new JSONObject(packet.toString());JSONObject r=remote.getJSONArray("records").getJSONObject(0);
+            check(r.getString("primaryNote").equals("吃饭"),"primary note persists");
             long remoteVersion=r.getLong("version")+10;r.put("amount",456).put("version",remoteVersion).put("actor",UUID.randomUUID().toString());
             String fourth=UUID.randomUUID().toString();remote.getJSONArray("users").put(new JSONObject().put("id",fourth).put("name","第四位用户").put("nameAt",System.currentTimeMillis()));
             r.put("owner",fourth);

@@ -19,6 +19,20 @@ class SharedSyncTests(unittest.TestCase):
         return dict(protocol=4,device=device,revision=revision,subscriptions=[u["id"] for u in profiles],records=records,users=profiles)
     def row(self,actor,owner=None,version=3,**kw):
         return dict(id=str(uuid.uuid4()),amount=123,at='2026-10-20T12:00',category='daily',note='测试',owner=owner or TEST_USERS[0],version=version,actor=actor,deleted=False,**kw)
+    def test_primary_note_round_trip_and_legacy_edit(self):
+        row=self.row(self.a,primaryNote='吃饭')
+        self.store.accept(self.packet(self.a,[row]))
+        other=s.Store(self.tmp.name)
+        reply=other.accept(self.packet(self.b,[]))
+        self.assertEqual(reply['records'][0]['primaryNote'],'吃饭')
+        self.assertEqual(reply['records'][0]['note'],'测试')
+        old_edit={**row,'actor':self.b,'version':4,'note':'牛肉面'}
+        del old_edit['primaryNote']
+        self.assertEqual(other.accept(self.packet(self.b,[old_edit],2))['records'][0]['primaryNote'],'吃饭')
+        cleared={**old_edit,'primaryNote':'','version':5}
+        self.assertEqual(other.accept(self.packet(self.b,[cleared],3))['records'][0]['primaryNote'],'')
+        with self.assertRaises(ValueError):other.accept(self.packet(self.b,[{**cleared,'primaryNote':'x'*61,'version':6}],4))
+
     def test_two_devices_both_users_cross_edit_delete_and_stale_replay(self):
         a,b=self.row(self.a),self.row(self.b,TEST_USERS[1])
         self.store.accept(self.packet(self.a,[a]));reply=self.store.accept(self.packet(self.b,[b]))
@@ -41,7 +55,7 @@ class SharedSyncTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 store=s.Store(tmp)
                 for e in rows:store.accept(self.packet(e['actor'],[e]))
-                self.assertEqual(store.export()['entries'],[expected])
+                self.assertEqual(store.export()['entries'],[{**expected,'primaryNote':''}])
     def test_rename_users_syncs_independently_of_entries(self):
         users=copy.deepcopy(self.users);users[1].update(name='小明',nameAt=2)
         self.store.accept(self.packet(self.b,[],users=users))

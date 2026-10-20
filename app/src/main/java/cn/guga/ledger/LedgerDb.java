@@ -14,12 +14,12 @@ public final class LedgerDb extends SQLiteOpenHelper {
         if (instance == null) instance = new LedgerDb(c.getApplicationContext());
         return instance;
     }
-    private LedgerDb(Context c) { super(c, "ledger.db", null, 4); }
+    private LedgerDb(Context c) { super(c, "ledger.db", null, 5); }
     public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE entries(id TEXT PRIMARY KEY, amount INTEGER NOT NULL, at TEXT NOT NULL, category TEXT NOT NULL, note TEXT NOT NULL)");
         db.execSQL("CREATE TABLE meta(device TEXT NOT NULL, revision INTEGER NOT NULL)");
         db.execSQL("INSERT INTO meta VALUES(?,0)", new Object[]{UUID.randomUUID().toString()});
-        onUpgrade(db,1,4);
+        onUpgrade(db,1,5);
         String initial=UUID.randomUUID().toString();
         db.execSQL("UPDATE users SET id=?",new Object[]{initial});
         db.execSQL("UPDATE meta SET currentUser=?",new Object[]{initial});
@@ -46,6 +46,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
             db.execSQL("INSERT INTO users_current SELECT id,name,CASE WHEN version=0 THEN 0 ELSE ? END,avatar,avatarAt,CASE WHEN version=0 THEN 1 ELSE 0 END FROM users",new Object[]{System.currentTimeMillis()});
             db.execSQL("DROP TABLE users");db.execSQL("ALTER TABLE users_current RENAME TO users");
         }
+        if(a<5)db.execSQL("ALTER TABLE entries ADD COLUMN primaryNote TEXT NOT NULL DEFAULT ''");
     }
     public synchronized JSONObject snapshot() throws JSONException {
         JSONObject result=syncSnapshot(); JSONArray visible=new JSONArray(),rows=result.getJSONArray("records");
@@ -61,10 +62,10 @@ public final class LedgerDb extends SQLiteOpenHelper {
             c.moveToFirst(); result.put("device", c.getString(0)); result.put("revision", c.getLong(1));
         }
         JSONArray records = new JSONArray(),users=new JSONArray();
-        try (Cursor c = db.rawQuery("SELECT id,amount,at,category,note,owner,version,actor,deleted FROM entries ORDER BY at DESC,id", null)) {
+        try (Cursor c = db.rawQuery("SELECT id,amount,at,category,note,owner,version,actor,deleted,primaryNote FROM entries ORDER BY at DESC,id", null)) {
             while (c.moveToNext()) records.put(new JSONObject().put("id",c.getString(0)).put("amount",c.getLong(1))
                 .put("at",c.getString(2)).put("category",c.getString(3)).put("note",c.getString(4))
-                .put("owner",c.getString(5)).put("version",c.getLong(6)).put("actor",c.getString(7)).put("deleted",c.getInt(8)!=0));
+                .put("owner",c.getString(5)).put("version",c.getLong(6)).put("actor",c.getString(7)).put("deleted",c.getInt(8)!=0).put("primaryNote",c.getString(9)));
         }
         JSONArray subscriptions=new JSONArray();
         try(Cursor c=db.rawQuery("SELECT id FROM users ORDER BY id",null)){while(c.moveToNext())subscriptions.put(c.getString(0));}
@@ -93,12 +94,12 @@ public final class LedgerDb extends SQLiteOpenHelper {
         UUID.fromString(e.getString("id")); validUser(e.getString("owner"));
         LocalDateTime.parse(e.getString("at"));
         long amount=e.getLong("amount");
-        if(amount<1||amount>99999999999L||!e.getString("category").matches("daily|extra|claim|giving")||e.getString("note").length()>200)throw new IllegalArgumentException("无效账单");
+        if(amount<1||amount>99999999999L||!e.getString("category").matches("daily|extra|claim|giving")||e.getString("note").length()>200||e.optString("primaryNote").length()>60)throw new IllegalArgumentException("无效账单");
     }
     private ContentValues entryValues(JSONObject e) throws Exception {
         validEntry(e); ContentValues v=new ContentValues();
         for(String key:new String[]{"id","at","category","note","owner","actor"})v.put(key,e.getString(key));
-        v.put("amount",e.getLong("amount"));v.put("version",e.getLong("version"));v.put("deleted",e.getBoolean("deleted")?1:0);return v;
+        v.put("primaryNote",e.optString("primaryNote",""));v.put("amount",e.getLong("amount"));v.put("version",e.getLong("version"));v.put("deleted",e.getBoolean("deleted")?1:0);return v;
     }
     private void stamp(SQLiteDatabase db,ContentValues v){
         db.execSQL("UPDATE meta SET clock=clock+1,revision=revision+1");

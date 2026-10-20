@@ -34,7 +34,8 @@
         </button>
         <div id="category-menu" role="listbox" aria-labelledby="category-label" hidden></div>
       </div>
-      <label class="field-label" for="note">备注<span class="optional">选填</span></label><input id="note" maxlength="200" placeholder="这笔钱花在哪里？">
+      <label class="field-label" for="primary-note">一级备注<span class="optional">选填 · 可用于统计</span></label><input id="primary-note" maxlength="60" placeholder="例如：吃饭、交通、购物">
+      <label class="field-label" for="note">二级备注<span class="optional">选填</span></label><input id="note" maxlength="200" placeholder="例如：牛肉面、咖啡、公交车">
       <p id="form-error" role="alert"></p>
       <div class="editor-actions"><button class="primary" type="submit">保存这笔支出</button><button type="button" id="delete" class="danger">删除这笔记录</button><p class="save-hint">保存在手机 · 离线也能记账</p></div>
     </form>

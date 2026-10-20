@@ -5,6 +5,15 @@ function day(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'
 function period(type,now=new Date()) {const end=new Date(now.getFullYear(),now.getMonth(),now.getDate());const start=new Date(end);if(type==='month')start.setDate(1);else if(type==='week')start.setDate(start.getDate()-(start.getDay()+6)%7);else start.setDate(start.getDate()-(type==='30'?29:6));return {start:day(start),end:day(end)}}
 function stats(entries,type,now=new Date()){const range=period(type,now);const days=[];for(let d=new Date(range.start+'T12:00:00');day(d)<=range.end;d.setDate(d.getDate()+1))days.push({date:day(d),amount:0});const totals=Object.fromEntries(Object.keys(categories).map(k=>[k,0]));const included=entries.filter(e=>e.at.slice(0,10)>=range.start&&e.at.slice(0,10)<=range.end);for(const e of included){totals[e.category]+=e.amount;days.find(d=>d.date===e.at.slice(0,10)).amount+=e.amount}return {...range,days,totals,total:included.reduce((s,e)=>s+e.amount,0),count:included.length}}
 function cents(value){if(!/^\d{1,9}(\.\d{1,2})?$/.test(value))throw Error('金额最多 9 位整数、2 位小数');const [a,b='']=value.split('.');const n=Number(a)*100+Number(b.padEnd(2,'0'));if(n<=0)throw Error('请输入大于零的金额');return n}
+function breakdown(entries,type,dimension='category',now=new Date()){
+ const range=period(type,now),groups=new Map();
+ for(const e of entries){if(e.at.slice(0,10)<range.start||e.at.slice(0,10)>range.end)continue;
+  const key=dimension==='category'?e.category:(e[dimension]||'').trim();
+  const item=groups.get(key)||{key,name:dimension==='category'?categories[key].name:key||'未填写',amount:0,count:0};
+  item.amount+=e.amount;item.count++;groups.set(key,item);
+ }
+ return [...groups.values()].sort((a,b)=>b.amount-a.amount||a.name.localeCompare(b.name,'zh-CN'));
+}
 // Parse arithmetic as exact rational values; round only the final result to cents.
 function calculateAmount(value){
  const text=String(value).replace(/×/g,'*').replace(/÷/g,'/').replace(/（/g,'(').replace(/）/g,')').trim();
@@ -28,5 +37,5 @@ function calculateAmount(value){
  if(result>99999999999n)throw Error('金额最多 9 位整数、2 位小数');
  return Number(result);
 }
-const api={categories,day,period,stats,cents,calculateAmount};if(typeof module!=='undefined')module.exports=api;root.LedgerModel=api;
+const api={categories,day,period,stats,breakdown,cents,calculateAmount};if(typeof module!=='undefined')module.exports=api;root.LedgerModel=api;
 })(globalThis);
