@@ -75,3 +75,15 @@ test('eye exclusions update every statistic while retaining restorable legend it
  assert.equal(M.reportData(rows,'month','category',[],now).summary.total,6500);
  assert.equal(M.stats(rows,'month',now).total,6500);
 });
+test('detail filters combine dates and all dimensions, include endpoints and override month',()=>{
+ const rows=[{id:'a',at:'2026-09-30',category:'daily',primaryNote:'购物',note:'鞋',amount:100},
+ {id:'b',at:'2026-10-01',category:'extra',primaryNote:'购物',note:'鞋',amount:200},
+ {id:'c',at:'2026-10-20',category:'daily',primaryNote:'购物',note:'衣服',amount:300},
+ {id:'d',at:'2026-10-21',category:'daily',primaryNote:'',note:'',amount:400}];
+ assert.deepEqual(M.filterEntries(rows,{start:'2026-09-30',end:'2026-10-01',primaryNote:'购物'},'2026-10').map(e=>e.id),['b','a']);
+ assert.deepEqual(M.filterEntries(rows,{category:'daily',primaryNote:'购物',note:'鞋',start:'2026-09-30'},'2026-10').map(e=>e.id),['a']);
+ assert.deepEqual(M.filterEntries(rows,{note:''},'2026-10').map(e=>e.id),['d']);
+ assert.deepEqual(M.filterEntries(rows,{},'2026-10').map(e=>e.id),['d','c','b']);
+ assert.deepEqual(M.filterEntries(rows,{end:'2026-09-30'},'2026-10').map(e=>e.id),['a']);
+ assert.equal(M.filterEntries(rows,{category:'claim'},'2026-10').length,0);
+});

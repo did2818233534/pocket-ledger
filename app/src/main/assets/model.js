@@ -21,6 +21,13 @@ function breakdown(entries,type,dimension='category',now=new Date()){
  }
  return [...groups.values()].sort((a,b)=>b.amount-a.amount||a.name.localeCompare(b.name,'zh-CN'));
 }
+function filterEntries(entries,filters={},month=''){
+ return entries.filter(e=>{const date=e.at.slice(0,10);
+  if(filters.start||filters.end){if(filters.start&&date<filters.start||filters.end&&date>filters.end)return false}
+  else if(month&&!date.startsWith(month))return false;
+  return ['category','primaryNote','note'].every(key=>filters[key]==null||(key==='category'?e.category:(e[key]||'').trim())===filters[key]);
+ }).slice().sort((a,b)=>b.at.localeCompare(a.at)||a.id.localeCompare(b.id));
+}
 function reportData(entries,type,dimension='category',excluded=[],now=new Date()){
  const hidden=new Set(excluded);
  const included=entries.filter(e=>!hidden.has(dimension==='category'?e.category:(e[dimension]||'').trim()));
@@ -49,5 +56,5 @@ function calculateAmount(value){
  if(result>99999999999n)throw Error('金额最多 9 位整数、2 位小数');
  return Number(result);
 }
-const api={categories,day,period,stats,breakdown,reportData,dateOnly,cents,calculateAmount};if(typeof module!=='undefined')module.exports=api;root.LedgerModel=api;
+const api={categories,day,period,stats,breakdown,filterEntries,reportData,dateOnly,cents,calculateAmount};if(typeof module!=='undefined')module.exports=api;root.LedgerModel=api;
 })(globalThis);
