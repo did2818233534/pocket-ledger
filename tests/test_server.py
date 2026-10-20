@@ -9,6 +9,9 @@ import unittest
 import urllib.request
 import urllib.error
 import uuid
+import sqlite3
+import shutil
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("server", Path(__file__).parents[1] / "desktop/server.py")
 s = importlib.util.module_from_spec(spec)
@@ -95,6 +98,59 @@ class SyncTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.accept(self.data)
         self.assertEqual(self.store.export()["entries"][0]["category"], "giving")
+
+    def test_mdns_proof_binds_address_list_and_port_without_exposing_key(self):
+        props = s.mdns_properties(self.store.key, ["192.168.10.157", "10.0.0.2"])
+        self.assertEqual(props["hosts"], "10.0.0.2,192.168.10.157")
+        self.assertEqual(props["proof"], s.sign(self.store.key, "mdns\n10.0.0.2,192.168.10.157\n47831"))
+        self.assertNotEqual(props["proof"], s.sign(self.store.key, "mdns\n192.168.10.1\n47831"))
+        self.assertNotEqual(props["proof"], s.sign(self.store.key, "mdns\n10.0.0.2,192.168.10.157\n80"))
+        self.assertNotIn(self.store.key, json.dumps(props))
+
+    def test_failed_atomic_replace_preserves_previous_ledger(self):
+        self.store.accept(self.data)
+        previous = self.store.export()
+        self.data["revision"] = 2
+        self.data["entries"][0]["amount"] = 9999
+        with patch.object(s.os, "replace", side_effect=OSError("simulated disk error")):
+            with self.assertRaises(OSError):
+                self.store.accept(self.data)
+        self.assertEqual(self.store.export(), previous)
+        self.assertEqual(list(self.store.directory.glob(".ledger-*.tmp")), [])
+
+    def test_json_directory_can_be_copied_with_pairing_and_versions(self):
+        self.store.accept(self.data)
+        with tempfile.TemporaryDirectory() as destination:
+            copied = Path(destination) / "data"
+            shutil.copytree(self.store.directory, copied)
+            restored = s.Store(copied)
+            self.assertEqual(restored.key, self.store.key)
+            self.assertEqual(restored.export(), self.store.export())
+            self.data.update(revision=2, entries=[])
+            restored.accept(self.data)
+            self.assertEqual(restored.export()["entries"], [])
+
+    def test_sqlite_migration_preserves_pairing_records_and_revision(self):
+        legacy_dir = Path(self.tmp.name) / "migration" / "data"
+        legacy_dir.mkdir(parents=True)
+        (legacy_dir / "config.json").write_text(json.dumps({"key": self.store.key}))
+        entry = self.data["entries"][0]
+        with sqlite3.connect(legacy_dir / "ledger.sqlite3") as db:
+            db.executescript("""
+                CREATE TABLE devices(id TEXT, revision INTEGER, updated TEXT);
+                CREATE TABLE entries(device TEXT,id TEXT,amount INTEGER,at TEXT,category TEXT,note TEXT);
+            """)
+            db.execute("INSERT INTO devices VALUES(?,?,?)", (self.data["device"], 1, "2026-10-20"))
+            db.execute("INSERT INTO entries VALUES(?,?,?,?,?,?)",
+                       (self.data["device"], entry["id"], entry["amount"], entry["at"], entry["category"], entry["note"]))
+        restored = s.Store(legacy_dir)
+        self.assertEqual(restored.key, self.store.key)
+        self.assertEqual(restored.export()["devices"][0]["revision"], 1)
+        self.assertEqual(restored.export()["entries"][0], {"device": self.data["device"], **entry})
+        self.assertFalse((legacy_dir / "ledger.sqlite3").exists())
+        self.assertEqual(len(list((legacy_dir.parent / "backups").glob("*.sqlite3"))), 1)
+        restored.accept(self.data)
+        self.assertEqual(len(restored.export()["entries"]), 1)
 
 
 if __name__ == "__main__":

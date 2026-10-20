@@ -1,8 +1,9 @@
 # Requires an unlocked paired phone, the local desktop service, and WebView CDP on 9228.
-import os,json,time,uuid,sqlite3,subprocess
+import os,json,time,uuid,subprocess
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 base=Path(__file__).resolve().parents[1]
+data_dir=Path(os.environ.get('LEDGER_DATA_DIR','/opt/pocket-ledger/data'))
 serial=os.environ['ANDROID_SERIAL']
 with sync_playwright() as p:
  b=p.chromium.connect_over_cdp('http://127.0.0.1:9228',no_defaults=True);page=b.contexts[0].pages[0]
@@ -37,8 +38,8 @@ with sync_playwright() as p:
   page.locator('#amount').fill('0.01');page.locator('#note').fill(marker)
   page.locator('button[type=submit]').click()
   s=synced();eid=next(e['id'] for e in s['entries'] if e['note']==marker)
-  with sqlite3.connect(base/'desktop/data/ledger.sqlite3') as db:
-   assert db.execute('SELECT category,amount FROM entries WHERE device=? AND id=?',(s['device'],eid)).fetchone()==('giving',1)
+  backed_up=json.loads((data_dir/'ledger.json').read_text())['entries']
+  assert any(e['device']==s['device'] and e['id']==eid and e['category']=='giving' and e['amount']==1 for e in backed_up)
   page.locator(f'[data-edit="{eid}"]').click()
   assert page.locator('#category-name').inner_text()=='借出赠与'
   page.locator('#cancel').click()

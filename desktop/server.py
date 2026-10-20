@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phone-authoritative LAN backup server. Python standard library only."""
+"""Phone-authoritative LAN backup server. mDNS discovery via python-zeroconf."""
 import argparse
 import datetime as dt
 import hashlib
@@ -9,10 +9,12 @@ import json
 import os
 from pathlib import Path
 import secrets
+import signal
 import socket
 import sqlite3
 import subprocess
 import threading
+import tempfile
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,7 +38,8 @@ def addresses():
     try:
         data = json.loads(subprocess.check_output(["ip", "-j", "-4", "addr"], timeout=3))
         return [(a["local"], a.get("broadcast")) for i in data for a in i.get("addr_info", [])
-                if a.get("scope") == "global" and lan(a["local"])]
+                if "UP" in i.get("flags", []) and "LOWER_UP" in i.get("flags", [])
+                and a.get("scope") == "global" and a.get("broadcast") and lan(a["local"])]
     except (OSError, ValueError, subprocess.SubprocessError):
         return []
 
@@ -51,16 +54,56 @@ class Store:
             with os.fdopen(fd, "w") as f:
                 json.dump({"key": secrets.token_hex(32)}, f)
         self.key = json.loads(config.read_text())["key"]
-        self.db = self.directory / "ledger.sqlite3"
-        with self.connect() as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, updated TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS entries(device TEXT NOT NULL,id TEXT NOT NULL,amount INTEGER NOT NULL,
-                    at TEXT NOT NULL,category TEXT NOT NULL,note TEXT NOT NULL,PRIMARY KEY(device,id));
-            """)
+        self.path = self.directory / "ledger.json"
+        self.lock = threading.RLock()
+        if not self.path.exists():
+            legacy = self.directory / "ledger.sqlite3"
+            data = {"format": 1, "devices": [], "entries": []}
+            if legacy.exists():
+                with sqlite3.connect("file:" + str(legacy) + "?mode=ro", uri=True) as db:
+                    if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                        raise OSError("Legacy database integrity check failed")
+                    db.row_factory = sqlite3.Row
+                    data["devices"] = [dict(row) for row in db.execute("SELECT * FROM devices")]
+                    data["entries"] = [dict(row) for row in db.execute("SELECT * FROM entries ORDER BY at DESC")]
+            self._write(data)
+            if self.export() != data:
+                raise OSError("JSON migration verification failed")
+            if legacy.exists():
+                archive = self.directory.parent / "backups"
+                archive.mkdir(mode=0o700, exist_ok=True)
+                backup = archive / ("ledger-before-json-" + str(time.time_ns()) + ".sqlite3")
+                legacy.replace(backup)
 
-    def connect(self):
-        return sqlite3.connect(self.db, timeout=15)
+    def _write(self, data):
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.directory,
+                    prefix=".ledger-", suffix=".tmp", delete=False) as file:
+                temporary = Path(file.name)
+                json.dump(data, file, ensure_ascii=False, indent=2)
+                file.write("\n")
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temporary, self.path)
+            fd = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def export(self):
+        with self.lock:
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                if data.get("format") != 1 or not isinstance(data.get("devices"), list) or not isinstance(data.get("entries"), list):
+                    raise ValueError("Invalid ledger format")
+                return data
+            except (ValueError, AttributeError) as error:
+                raise OSError("Cannot read ledger JSON; file preserved") from error
 
     def accept(self, data):
         device = str(uuid.UUID(data["device"]))
@@ -86,23 +129,20 @@ class Store:
             if e["category"] not in ("daily", "extra", "claim", "giving") or not isinstance(e["note"], str) or len(e["note"]) > 200:
                 raise ValueError("invalid category or note")
             rows.append((device, eid, amount, when, e["category"], e["note"]))
-        with self.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            previous = db.execute("SELECT revision FROM devices WHERE id=?", (device,)).fetchone()
-            if previous and previous[0] > revision:
+        with self.lock:
+            stored = self.export()
+            previous = next((item for item in stored["devices"] if item["id"] == device), None)
+            if previous and previous["revision"] > revision:
                 raise ValueError("stale revision")
-            if not previous or previous[0] != revision:
-                db.execute("DELETE FROM entries WHERE device=?", (device,))
-                db.executemany("INSERT INTO entries VALUES(?,?,?,?,?,?)", rows)
-                db.execute("INSERT OR REPLACE INTO devices VALUES(?,?,?)",
-                           (device, revision, dt.datetime.now(dt.timezone.utc).isoformat()))
+            if not previous or previous["revision"] != revision:
+                stored["entries"] = [entry for entry in stored["entries"] if entry["device"] != device]
+                stored["entries"].extend(dict(zip(("device", "id", "amount", "at", "category", "note"), row)) for row in rows)
+                stored["entries"].sort(key=lambda entry: entry["at"], reverse=True)
+                stored["devices"] = [item for item in stored["devices"] if item["id"] != device]
+                stored["devices"].append({"id": device, "revision": revision,
+                    "updated": dt.datetime.now(dt.timezone.utc).isoformat()})
+                self._write(stored)
         return {"revision": revision, "count": len(rows)}
-
-    def export(self):
-        with self.connect() as db:
-            db.row_factory = sqlite3.Row
-            return {"devices": [dict(r) for r in db.execute("SELECT * FROM devices")],
-                    "entries": [dict(r) for r in db.execute("SELECT * FROM entries ORDER BY at DESC")]}
 
 
 def handler(store):
@@ -145,7 +185,7 @@ def handler(store):
                 self.reply(200, result, timestamp)
             except (ValueError, KeyError, TypeError, OverflowError):
                 self.reply(400, {"error": "invalid snapshot"})
-            except sqlite3.Error:
+            except (OSError, sqlite3.Error):
                 self.reply(503, {"error": "storage unavailable"})
 
         def do_GET(self):
@@ -153,27 +193,51 @@ def handler(store):
     return Handler
 
 
+MDNS_TYPE = "_pocket-ledger._tcp.local."
+
+
+def mdns_properties(key, hosts):
+    addresses_text = ",".join(sorted(hosts))
+    return {"v": "1", "hosts": addresses_text, "proof": sign(key, "mdns\n" + addresses_text + "\n" + str(PORT))}
+
+
 def announce(store, stop):
-    while not stop.is_set():
-        for host, broadcast in addresses():
-            if not broadcast:
-                continue
-            body = json.dumps({"app": "pocket-ledger", "host": host, "time": int(time.time())}, separators=(",", ":"))
-            payload = json.dumps({"body": body, "signature": sign(store.key, body)}).encode()
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                    sock.bind((host, 0))
-                    sock.sendto(payload, (broadcast, 47832))
-            except OSError:
-                pass
-        stop.wait(20)
+    from zeroconf import IPVersion, ServiceInfo, Zeroconf
+    zeroconf = None
+    published = ()
+    try:
+        while not stop.is_set():
+            hosts = tuple(sorted({host for host, _ in addresses()}))
+            if hosts != published or (hosts and zeroconf is None):
+                if zeroconf is not None:
+                    zeroconf.close()
+                    zeroconf = None
+                published = ()
+                if hosts:
+                    try:
+                        zeroconf = Zeroconf(interfaces=list(hosts), ip_version=IPVersion.V4Only)
+                        instance = "Pocket Ledger " + hashlib.sha256(store.key.encode()).hexdigest()[:8]
+                        info = ServiceInfo(MDNS_TYPE, instance + "." + MDNS_TYPE,
+                            addresses=[socket.inet_aton(host) for host in hosts], port=PORT,
+                            properties=mdns_properties(store.key, hosts),
+                            server=socket.gethostname().split(".")[0] + ".local.")
+                        zeroconf.register_service(info, allow_name_change=True)
+                        published = hosts
+                    except Exception as error:
+                        print("mDNS publication will retry: " + type(error).__name__, flush=True)
+                        if zeroconf is not None:
+                            zeroconf.close()
+                            zeroconf = None
+            stop.wait(20)
+    finally:
+        if zeroconf is not None:
+            zeroconf.close()
 
 
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", default=str(Path(__file__).resolve().parent / "data"))
+    parser.add_argument("--data", default="/opt/pocket-ledger/data")
     parser.add_argument("--pair", action="store_true")
     parser.add_argument("--export", type=Path)
     args = parser.parse_args()
@@ -191,6 +255,10 @@ def main():
     server.daemon_threads = True
     worker = threading.Thread(target=announce, args=(store, stop), daemon=True)
     worker.start()
+    def terminate(_signum, _frame):
+        stop.set()
+        threading.Thread(target=server.shutdown, daemon=True).start()
+    signal.signal(signal.SIGTERM, terminate)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -198,7 +266,7 @@ def main():
     finally:
         stop.set()
         server.server_close()
-        worker.join(timeout=4)
+        worker.join(timeout=8)
 
 
 if __name__ == "__main__":

@@ -110,7 +110,8 @@ public class MainActivity extends Activity {
                 android.content.SharedPreferences p = getSharedPreferences("sync",0);
                 return data.put("host",p.getString("host","")).put("paired",!p.getString("key","").isEmpty())
                     .put("enabled",p.getBoolean("enabled",false)).put("status",p.getString("status","尚未连接电脑"))
-                    .put("lastSync",p.getLong("lastSync",0)).put("syncedRevision",p.getLong("syncedRevision",-1)).toString();
+                    .put("lastSync",p.getLong("lastSync",0)).put("lastDiscovery",p.getLong("lastDiscovery",0))
+                    .put("syncedRevision",p.getLong("syncedRevision",-1)).toString();
             } catch(Exception e) { return "{\"error\":\"读取账本失败\"}"; }
         }
         @JavascriptInterface public String save(String data) {
@@ -119,11 +120,11 @@ public class MainActivity extends Activity {
         }
         @JavascriptInterface public void remove(String id) { LedgerDb.get(MainActivity.this).delete(id); autoSync(); }
         private void autoSync() {
-            if (getSharedPreferences("sync",0).getBoolean("enabled",false)) SyncService.request(MainActivity.this);
+            if (!getSharedPreferences("sync",0).getString("key","").isEmpty()) SyncService.requestQuietly(MainActivity.this);
         }
         @JavascriptInterface public String configure(String host, String key) {
             try {
-                SyncService.validateHost(host);
+                SyncService.validateEndpoint(host);
                 if (key.isEmpty()) key = getSharedPreferences("sync",0).getString("key","");
                 if (!key.matches("[a-f0-9]{64}")) return "请输入电脑生成的 64 位配对密钥";
                 getSharedPreferences("sync",0).edit().putString("host",host).putString("key",key).putBoolean("enabled",true).commit();
@@ -133,11 +134,11 @@ public class MainActivity extends Activity {
                     startForegroundService(new Intent(MainActivity.this,SyncService.class));
                 });
                 return "";
-            } catch(Exception e) { return "请输入局域网 IPv4 地址，例如 192.168.1.8"; }
+            } catch(Exception e) { return "请输入 .local 主机名或局域网 IPv4 地址，例如 guga.local"; }
         }
         @JavascriptInterface public void sync() { SyncService.request(MainActivity.this); }
         @JavascriptInterface public void stop() {
-            getSharedPreferences("sync",0).edit().putBoolean("enabled",false).putString("status","自动同步已暂停").apply();
+            getSharedPreferences("sync",0).edit().putBoolean("enabled",false).putString("status","后台检查已暂停，保存账目时仍会尝试同步").apply();
             stopService(new Intent(MainActivity.this,SyncService.class));
         }
         @JavascriptInterface public void exportData() {
