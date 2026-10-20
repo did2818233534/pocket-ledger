@@ -19,6 +19,18 @@ class SharedSyncTests(unittest.TestCase):
         return dict(protocol=4,device=device,revision=revision,subscriptions=[u["id"] for u in profiles],records=records,users=profiles)
     def row(self,actor,owner=None,version=3,**kw):
         return dict(id=str(uuid.uuid4()),amount=123,at='2026-10-20T12:00',category='daily',note='测试',owner=owner or TEST_USERS[0],version=version,actor=actor,deleted=False,**kw)
+    def test_reimbursement_roundtrip_undo_and_legacy_edit(self):
+        row={**self.row(self.a),'category':'claim','reimbursed':True}
+        self.store.accept(self.packet(self.a,[row]))
+        other=s.Store(self.tmp.name)
+        self.assertTrue(other.accept(self.packet(self.b,[]))['records'][0]['reimbursed'])
+        legacy={**row,'version':4,'actor':self.b};del legacy['reimbursed']
+        self.assertTrue(other.accept(self.packet(self.b,[legacy],2))['records'][0]['reimbursed'])
+        undo={**legacy,'reimbursed':False,'version':5}
+        other.accept(self.packet(self.b,[undo],3))
+        self.assertFalse(other.accept(self.packet(self.a,[row],2))['records'][0]['reimbursed'])
+        with self.assertRaises(ValueError):other.accept(self.packet(self.a,[{**undo,'reimbursed':'yes','version':6}],3))
+
     def test_dates_are_day_only_and_legacy_replay_converges(self):
         row=self.row(self.a)
         reply=self.store.accept(self.packet(self.a,[row]))
@@ -70,7 +82,7 @@ class SharedSyncTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 store=s.Store(tmp)
                 for e in rows:store.accept(self.packet(e['actor'],[e]))
-                self.assertEqual(store.export()['entries'],[{**expected,'primaryNote':'','at':expected['at'][:10]}])
+                self.assertEqual(store.export()['entries'],[{**expected,'primaryNote':'','reimbursed':False,'at':expected['at'][:10]}])
     def test_rename_users_syncs_independently_of_entries(self):
         users=copy.deepcopy(self.users);users[1].update(name='小明',nameAt=2)
         self.store.accept(self.packet(self.b,[],users=users))

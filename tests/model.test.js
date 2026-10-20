@@ -87,3 +87,12 @@ test('detail filters combine dates and all dimensions, include endpoints and ove
  assert.deepEqual(M.filterEntries(rows,{end:'2026-09-30'},'2026-10').map(e=>e.id),['a']);
  assert.equal(M.filterEntries(rows,{category:'claim'},'2026-10').length,0);
 });
+test('reimbursed claims remain in ledger but disappear from every statistic and drilldown',()=>{
+ const rows=[{id:'a',at:'2026-10-20',amount:1000,category:'claim',primaryNote:'购物',note:'鞋',reimbursed:true},{id:'b',at:'2026-10-20',amount:2000,category:'claim',primaryNote:'购物',note:'鞋',reimbursed:false},{id:'c',at:'2026-10-20',amount:3000,category:'daily',primaryNote:'购物',note:'鞋'}];
+ for(const period of ['month','week','7','30'])for(const dimension of ['category','primaryNote','note']){
+  const r=M.reportData(rows,period,dimension,[],new Date(2026,9,20));assert.equal(r.summary.total,5000);assert.equal(r.summary.count,2);assert.equal(r.summary.days.reduce((a,d)=>a+d.amount,0),5000);assert.equal(r.groups.reduce((a,g)=>a+g.amount,0),5000);
+ }
+ assert.equal(M.stats(rows,'month',new Date(2026,9,20)).total,6000);
+ assert.equal(M.filterEntries(M.statisticalEntries(rows),{primaryNote:'购物'},'2026-10').length,2);
+ rows[0].reimbursed=false;assert.equal(M.reportData(rows,'month','category',[],new Date(2026,9,20)).summary.total,6000);
+});

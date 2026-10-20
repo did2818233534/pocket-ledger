@@ -14,12 +14,12 @@ public final class LedgerDb extends SQLiteOpenHelper {
         if (instance == null) instance = new LedgerDb(c.getApplicationContext());
         return instance;
     }
-    private LedgerDb(Context c) { super(c, "ledger.db", null, 6); }
+    private LedgerDb(Context c) { super(c, "ledger.db", null, 7); }
     public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE entries(id TEXT PRIMARY KEY, amount INTEGER NOT NULL, at TEXT NOT NULL, category TEXT NOT NULL, note TEXT NOT NULL)");
         db.execSQL("CREATE TABLE meta(device TEXT NOT NULL, revision INTEGER NOT NULL)");
         db.execSQL("INSERT INTO meta VALUES(?,0)", new Object[]{UUID.randomUUID().toString()});
-        onUpgrade(db,1,6);
+        onUpgrade(db,1,7);
         String initial=UUID.randomUUID().toString();
         db.execSQL("UPDATE users SET id=?",new Object[]{initial});
         db.execSQL("UPDATE meta SET currentUser=?",new Object[]{initial});
@@ -48,6 +48,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
         }
         if(a<5)db.execSQL("ALTER TABLE entries ADD COLUMN primaryNote TEXT NOT NULL DEFAULT ''");
         if(a<6)db.execSQL("UPDATE entries SET at=substr(at,1,10)");
+        if(a<7)db.execSQL("ALTER TABLE entries ADD COLUMN reimbursed INTEGER NOT NULL DEFAULT 0");
     }
     public synchronized JSONObject snapshot() throws JSONException {
         JSONObject result=syncSnapshot(); JSONArray visible=new JSONArray(),rows=result.getJSONArray("records");
@@ -63,10 +64,10 @@ public final class LedgerDb extends SQLiteOpenHelper {
             c.moveToFirst(); result.put("device", c.getString(0)); result.put("revision", c.getLong(1));
         }
         JSONArray records = new JSONArray(),users=new JSONArray();
-        try (Cursor c = db.rawQuery("SELECT id,amount,at,category,note,owner,version,actor,deleted,primaryNote FROM entries ORDER BY at DESC,id", null)) {
+        try (Cursor c = db.rawQuery("SELECT id,amount,at,category,note,owner,version,actor,deleted,primaryNote,reimbursed FROM entries ORDER BY at DESC,id", null)) {
             while (c.moveToNext()) records.put(new JSONObject().put("id",c.getString(0)).put("amount",c.getLong(1))
                 .put("at",c.getString(2)).put("category",c.getString(3)).put("note",c.getString(4))
-                .put("owner",c.getString(5)).put("version",c.getLong(6)).put("actor",c.getString(7)).put("deleted",c.getInt(8)!=0).put("primaryNote",c.getString(9)));
+                .put("owner",c.getString(5)).put("version",c.getLong(6)).put("actor",c.getString(7)).put("deleted",c.getInt(8)!=0).put("primaryNote",c.getString(9)).put("reimbursed",c.getInt(10)!=0));
         }
         JSONArray subscriptions=new JSONArray();
         try(Cursor c=db.rawQuery("SELECT id FROM users ORDER BY id",null)){while(c.moveToNext())subscriptions.put(c.getString(0));}
@@ -101,6 +102,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
     private ContentValues entryValues(JSONObject e) throws Exception {
         validEntry(e); ContentValues v=new ContentValues();
         for(String key:new String[]{"id","at","category","note","owner","actor"})v.put(key,e.getString(key));
+        v.put("reimbursed",e.getString("category").equals("claim")&&e.optBoolean("reimbursed",false)?1:0);
         v.put("at",e.getString("at").substring(0,10));v.put("primaryNote",e.optString("primaryNote",""));v.put("amount",e.getLong("amount"));v.put("version",e.getLong("version"));v.put("deleted",e.getBoolean("deleted")?1:0);return v;
     }
     private void stamp(SQLiteDatabase db,ContentValues v){
@@ -115,9 +117,17 @@ public final class LedgerDb extends SQLiteOpenHelper {
                 if(c.moveToFirst())e.put("owner",c.getString(0));else try(Cursor m=db.rawQuery("SELECT currentUser FROM meta",null)){m.moveToFirst();e.put("owner",m.getString(0));}
             }
         }
+        if(!e.has("reimbursed"))try(Cursor c=db.rawQuery("SELECT reimbursed FROM entries WHERE id=?",new String[]{id})){e.put("reimbursed",c.moveToFirst()&&c.getInt(0)!=0);}
         e.put("note",e.optString("note")).put("version",1).put("actor",USER_ONE).put("deleted",false);
         ContentValues v=entryValues(e);db.beginTransaction();
         try{stamp(db,v);db.insertWithOnConflict("entries",null,v,SQLiteDatabase.CONFLICT_REPLACE);db.setTransactionSuccessful();}finally{db.endTransaction();}
+    }
+    public synchronized void toggleReimbursed(String id) {
+        SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
+        try(Cursor c=db.rawQuery("SELECT reimbursed FROM entries WHERE id=? AND category='claim' AND deleted=0",new String[]{id})){
+            if(!c.moveToFirst())throw new IllegalArgumentException("这不是待处理的报销账单");
+            ContentValues v=new ContentValues();v.put("reimbursed",c.getInt(0)==0?1:0);stamp(db,v);db.update("entries",v,"id=?",new String[]{id});db.setTransactionSuccessful();
+        }finally{db.endTransaction();}
     }
     public synchronized void delete(String id) {
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();

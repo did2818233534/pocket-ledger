@@ -187,6 +187,9 @@ public class MainActivity extends Activity {
         @JavascriptInterface public String renameUser(String id,String name) {
             try { LedgerDb.get(MainActivity.this).renameUser(id,name); autoSync(); return ""; } catch(Exception e) { return "名字需为 1–24 个字"; }
         }
+        @JavascriptInterface public String toggleReimbursed(String id) {
+            try{LedgerDb.get(MainActivity.this).toggleReimbursed(id);autoSync();return "";}catch(Exception e){return "报销状态更新失败，请重试";}
+        }
         @JavascriptInterface public void remove(String id) { LedgerDb.get(MainActivity.this).delete(id); autoSync(); }
         private void autoSync() {
             if (!getSharedPreferences("sync",0).getString("key","").isEmpty()) SyncService.requestQuietly(MainActivity.this);

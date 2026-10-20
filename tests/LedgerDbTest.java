@@ -67,6 +67,11 @@ public final class LedgerDbTest {
             check(db.snapshot().getJSONArray("entries").length()==0,"late reply must not re-add removed user's entries");
             JSONObject moved=new JSONObject().put("protocol",4).put("users",new JSONArray()).put("records",new JSONArray()).put("outOfScope",new JSONArray().put(new JSONObject().put("id",row.getString("id")).put("version",remoteVersion+100).put("actor",fourth)));
             db.merge(moved);check(db.syncSnapshot().getJSONArray("records").length()==0,"ownership change out of scope removes cached row");
+            JSONObject claim=entry(owner).put("category","claim");String claimId=claim.getString("id");db.save(claim.toString());
+            check(!db.snapshot().getJSONArray("entries").getJSONObject(0).getBoolean("reimbursed"),"new claim starts pending");
+            db.toggleReimbursed(claimId);check(db.snapshot().getJSONArray("entries").getJSONObject(0).getBoolean("reimbursed"),"claim can be reimbursed");
+            db.save(claim.put("note","edited detail").toString());check(db.snapshot().getJSONArray("entries").getJSONObject(0).getBoolean("reimbursed"),"editing preserves reimbursement");
+            db.toggleReimbursed(claimId);check(!db.snapshot().getJSONArray("entries").getJSONObject(0).getBoolean("reimbursed"),"claim can be restored to pending");
             db.close();db=null;clean();
             SQLiteDatabase legacy=SQLiteDatabase.openOrCreateDatabase(PATH,null);
             legacy.execSQL("CREATE TABLE entries(id TEXT PRIMARY KEY,amount INTEGER NOT NULL,at TEXT NOT NULL,category TEXT NOT NULL,note TEXT NOT NULL)");

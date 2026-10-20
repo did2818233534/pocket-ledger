@@ -292,6 +292,10 @@ class Store:
             if "primaryNote" in e and (not isinstance(e["primaryNote"], str) or len(e["primaryNote"]) > 60):
                 raise ValueError("invalid primary note")
             row = {k: e[k] for k in ("id", "amount", "at", "category", "note", "owner", "version", "actor", "deleted")}
+            if "reimbursed" in e:
+                if type(e["reimbursed"]) is not bool:
+                    raise ValueError("invalid reimbursement state")
+                row["reimbursed"] = e["reimbursed"] if e["category"] == "claim" else False
             row["at"] = when
             if "primaryNote" in e:
                 row["primaryNote"] = e["primaryNote"]
@@ -317,9 +321,10 @@ class Store:
             for e in rows:
                 old = merged.get(e["id"])
                 e.setdefault("primaryNote", (old or {}).get("primaryNote", ""))
+                e.setdefault("reimbursed", bool((old or {}).get("reimbursed", False)) if e["category"] == "claim" else False)
                 if old is None or self.stamp(e) > self.stamp(old):
                     merged[e["id"]] = e
-                elif self.stamp(e) == self.stamp(old) and any(e[k] != old.get(k, "") for k in e):
+                elif self.stamp(e) == self.stamp(old) and any(e[k] != old.get(k, False if k == "reimbursed" else "") for k in e):
                     raise ValueError("conflicting mutation identity")
             profiles = {u["id"]: {"id":u["id"],"name":u["name"],"nameAt":u.get("nameAt",0),
                                    "avatar":u.get("avatar",""),"avatarAt":u.get("avatarAt",0)} for u in stored["users"]}
