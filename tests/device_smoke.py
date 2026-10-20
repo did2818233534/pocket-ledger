@@ -34,7 +34,8 @@ with tempfile.TemporaryDirectory() as tmp:
             for amount,category,note in [('28.50','daily','午餐 · 一碗热面'),('129','extra','周末的小确幸'),('86.20','claim','出差打车')]:
                 page.locator('#add').click()
                 page.locator('#amount').fill(amount)
-                page.locator('#category').select_option(category)
+                page.locator('#category-trigger').click()
+                page.locator(f'[data-category={category}]').click()
                 page.locator('#note').fill(note)
                 page.locator('button[type=submit]').click()
             assert page.locator('.entry').count()==3
@@ -44,7 +45,7 @@ with tempfile.TemporaryDirectory() as tmp:
             for period in ['month','week','7','30']:
                 page.locator(f'[data-period="{period}"]').click()
                 assert '243.70' in page.locator('.stat-total').inner_text()
-                assert page.locator('.legend-item').count()==3
+                assert page.locator('.legend-item').count()==4
             page.locator('[data-period="7"]').click()
             page.locator('.bar').last.click()
             assert '243.70' in page.locator('#bar-detail').inner_text()

@@ -83,7 +83,7 @@ class Store:
             parsed = dt.datetime.fromisoformat(when)
             if parsed.tzinfo is not None or "T" not in when:
                 raise ValueError("local time required")
-            if e["category"] not in ("daily", "extra", "claim") or not isinstance(e["note"], str) or len(e["note"]) > 200:
+            if e["category"] not in ("daily", "extra", "claim", "giving") or not isinstance(e["note"], str) or len(e["note"]) > 200:
                 raise ValueError("invalid category or note")
             rows.append((device, eid, amount, when, e["category"], e["note"]))
         with self.connect() as db:

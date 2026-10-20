@@ -38,7 +38,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
         long amount = e.getLong("amount");
         String category = e.getString("category"), at = e.getString("at"), note = e.optString("note");
         LocalDateTime.parse(at);
-        if (amount < 1 || amount > 99999999999L || !category.matches("daily|extra|claim") || note.length() > 200)
+        if (amount < 1 || amount > 99999999999L || !category.matches("daily|extra|claim|giving") || note.length() > 200)
             throw new IllegalArgumentException("请检查金额、分类和备注");
         String id = e.optString("id");
         if (id.isEmpty()) id = UUID.randomUUID().toString();

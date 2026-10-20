@@ -1,1 +1,41 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:"><title>小账</title><link rel="stylesheet" href="style.css"></head><body><main id="app"></main><nav id="nav"><button data-page="ledger">▤<span>账本</span></button><button data-page="stats">◔<span>统计</span></button><button data-page="sync">⇄<span>同步</span></button></nav><button id="add" aria-label="记一笔">＋</button><dialog id="editor"><form id="entry-form"><div class="sheet-head"><h2 id="edit-title">记一笔</h2><button type="button" id="cancel" class="text-button">取消</button></div><label>支出金额（元）<input id="amount" type="text" inputmode="decimal" placeholder="0.00" required maxlength="12" autocomplete="off"></label><label>支出时间<input id="at" type="datetime-local" required></label><label>支出属性<select id="category"><option value="daily">日常生活</option><option value="extra">额外支出</option><option value="claim">报销垫付</option></select></label><label>备注<input id="note" maxlength="200" placeholder="记下这笔钱花在哪里"></label><p id="form-error" role="alert"></p><button class="primary" type="submit">保存到手机</button><button type="button" id="delete" class="danger">删除这笔记录</button></form></dialog><div id="toast" role="status"></div><script src="model.js"></script><script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
+  <title>小账</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app"></main>
+  <nav id="nav" aria-label="主导航">
+    <button data-page="ledger"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span>账本</span></button>
+    <button data-page="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3a9 9 0 1 0 10 10H11Z"/><path d="M15 3.5V9h5.5A9 9 0 0 0 15 3.5Z"/></svg><span>统计</span></button>
+    <button data-page="sync"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9a8 8 0 0 1 13.5-3L20 9M20 4v5h-5M20 15a8 8 0 0 1-13.5 3L4 15M4 20v-5h5"/></svg><span>同步</span></button>
+  </nav>
+  <button id="add" aria-label="记一笔"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+  <dialog id="editor" aria-labelledby="edit-title">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <form id="entry-form">
+      <div class="sheet-head"><div><h2 id="edit-title">记一笔</h2><p class="sheet-subtitle">记下生活里的每一笔</p></div><button type="button" id="cancel" class="text-button" autofocus>取消</button></div>
+      <div class="amount-panel"><label for="amount">支出金额<span>人民币 CNY</span></label><div class="amount-input"><span aria-hidden="true">¥</span><input id="amount" type="text" inputmode="decimal" placeholder="0.00" required maxlength="12" autocomplete="off"></div></div>
+      <label class="field-label" for="at">支出时间</label><input id="at" type="datetime-local" required>
+      <div id="category-field" class="category-field">
+        <label class="field-label" id="category-label">支出属性</label>
+        <input id="category" type="hidden" value="daily">
+        <button id="category-trigger" type="button" aria-labelledby="category-label category-name" aria-haspopup="listbox" aria-expanded="false" aria-controls="category-menu">
+          <span id="category-icon" class="category-icon" aria-hidden="true"></span><span id="category-name"></span>
+          <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+        </button>
+        <div id="category-menu" role="listbox" aria-labelledby="category-label" hidden></div>
+      </div>
+      <label class="field-label" for="note">备注<span class="optional">选填</span></label><input id="note" maxlength="200" placeholder="这笔钱花在哪里？">
+      <p id="form-error" role="alert"></p>
+      <div class="editor-actions"><button class="primary" type="submit">保存这笔支出</button><button type="button" id="delete" class="danger">删除这笔记录</button><p class="save-hint">保存在手机 · 离线也能记账</p></div>
+    </form>
+  </dialog>
+  <div id="toast" role="status"></div>
+  <script src="model.js"></script><script src="app.js"></script>
+</body>
+</html>

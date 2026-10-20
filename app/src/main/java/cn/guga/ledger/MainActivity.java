@@ -96,6 +96,14 @@ public class MainActivity extends Activity {
         });
     }
     class Bridge {
+        @JavascriptInterface public void hideKeyboard() {
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= 30)
+                    getWindow().getInsetsController().hide(WindowInsets.Type.ime());
+                else ((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE))
+                    .hideSoftInputFromWindow(web.getWindowToken(),0);
+            });
+        }
         @JavascriptInterface public String load() {
             try {
                 JSONObject data = LedgerDb.get(MainActivity.this).snapshot();

@@ -86,6 +86,16 @@ class SyncTests(unittest.TestCase):
         for ip in ("8.8.8.8", "127.0.0.1", "169.254.1.2", "172.32.0.1"):
             self.assertFalse(s.lan(ip))
 
+    def test_giving_category_round_trip_and_invalid_category(self):
+        self.data["entries"][0]["category"] = "giving"
+        self.store.accept(self.data)
+        self.assertEqual(self.store.export()["entries"][0]["category"], "giving")
+        self.data["revision"] = 2
+        self.data["entries"][0]["category"] = "unknown"
+        with self.assertRaises(ValueError):
+            self.store.accept(self.data)
+        self.assertEqual(self.store.export()["entries"][0]["category"], "giving")
+
 
 if __name__ == "__main__":
     unittest.main()

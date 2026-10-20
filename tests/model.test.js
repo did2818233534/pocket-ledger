@@ -19,9 +19,23 @@ test('all categories, no future spending, zero-filled days and exact cents',()=>
   const s=M.stats(entries,'month',new Date(2026,9,20));
   assert.equal(s.total,900);assert.equal(s.days.length,20);assert.equal(s.days[0].amount,0);
   assert.equal(s.days[19].amount,310);assert.equal(s.count,3);
-  assert.deepEqual(s.totals,{daily:101,extra:590,claim:209});
+  assert.deepEqual(s.totals,{daily:101,extra:590,claim:209,giving:0});
 });
 test('money parsing never rounds fractions silently',()=>{
   assert.equal(M.cents('0.29'),29);assert.equal(M.cents('12.3'),1230);
   for(const value of ['0','-1','1.234','abc','1e3','Infinity','1000000000'])assert.throws(()=>M.cents(value));
+});
+test('giving is included in every period and daily totals alongside older entries',()=>{
+  const entries=[
+    {at:'2026-10-20T12:00',amount:30000,category:'giving'},
+    {at:'2026-10-20T13:00',amount:5000,category:'daily'}
+  ];
+  for(const period of ['month','week','7','30']){
+    const s=M.stats(entries,period,new Date(2026,9,20));
+    assert.equal(s.total,35000);
+    assert.equal(s.totals.giving,30000);
+    assert.equal(s.totals.daily,5000);
+    assert.equal(s.days.at(-1).amount,35000);
+    assert.equal(s.count,2);
+  }
 });
