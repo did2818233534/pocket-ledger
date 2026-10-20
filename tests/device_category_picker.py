@@ -38,7 +38,8 @@ with sync_playwright() as p:
   page.locator('#amount').fill('0.01');page.locator('#note').fill(marker)
   page.locator('button[type=submit]').click()
   s=synced();eid=next(e['id'] for e in s['entries'] if e['note']==marker)
-  backed_up=json.loads((data_dir/'ledger.json').read_text())['entries']
+  index=json.loads((data_dir/'sync.json').read_text())
+  backed_up=[entry for month in index['months'] for entry in json.loads((data_dir/(month+'.json')).read_text())['entries']]
   assert any(e['device']==s['device'] and e['id']==eid and e['category']=='giving' and e['amount']==1 for e in backed_up)
   page.locator(f'[data-edit="{eid}"]').click()
   assert page.locator('#category-name').inner_text()=='借出赠与'

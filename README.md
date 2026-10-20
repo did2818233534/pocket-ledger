@@ -9,9 +9,10 @@
 | Git 源码 | `/home/guga/myself/project/pocket-ledger` |
 | 电脑服务程序 | `/opt/pocket-ledger/server.py` |
 | 独立数据目录 | `/opt/pocket-ledger/data/` |
-| 账目及同步版本 | `/opt/pocket-ledger/data/ledger.json` |
+| 月度账目 | `/opt/pocket-ledger/data/YYYY-MM.json`（如 `2026-10.json`） |
+| 同步版本和月份索引 | `/opt/pocket-ledger/data/sync.json` |
 | 配对配置 | `/opt/pocket-ledger/data/config.json` |
-| 一次性旧数据库备份 | `/opt/pocket-ledger/backups/ledger-before-json-*.sqlite3` |
+| 旧数据库 / 单文件 JSON 备份 | `/opt/pocket-ledger/backups/` |
 | 手机安装包（不提交 Git） | `dist/小账-1.0.0.apk` |
 
 电脑运行程序及数据不依赖源码目录。用户级 systemd 配置保存在 `~/.config/systemd/user/pocket-ledger.service`，启动的是 `/opt/pocket-ledger/server.py`。已为本机用户开启 linger，使服务可以开机启动而无需桌面登录。
@@ -68,7 +69,19 @@ Android 后台使用 `connectedDevice` 前台服务与常驻通知。省电、Do
 
 ## 复制和迁移电脑数据
 
-日常数据目录只有两个文件：`ledger.json` 与 `config.json`。`ledger.json` 为 UTF-8、缩进排版的 JSON，包含格式版本、设备同步版本和账目；金额单位为分，账目时间沿用手机本地时间。`config.json` 保存配对密钥，应一起迁移。
+日常数据按月份拆分，全部放在同一个 `data` 目录：
+
+```text
+data/
+├── config.json       # 配对配置
+├── sync.json         # 同步版本和月份索引
+├── 2026-09.json      # 9 月支出（有记录才生成）
+└── 2026-10.json      # 10 月支出
+```
+
+每个月的文件只包含该月账目，为 UTF-8、缩进排版的 JSON。金额单位为分，按支出时间的本地日历月份归档，而不是按同步日期。跨月修改会移动到对应月份；某月最后一条记录删除后，该月文件也会移除。未改变的月份不会重写。
+
+`sync.json` 只记录设备版本及月份索引，不重复存账目；`config.json` 保存配对密钥。迁移时应一起复制，不能只复制某个月的文件。
 
 1. 在旧电脑执行 `systemctl --user stop pocket-ledger`。
 2. 复制整个 `/opt/pocket-ledger/data/` 到新电脑的同名目录；目标服务应处于停止状态，先备份目标已有数据，避免误覆盖。
@@ -77,7 +90,9 @@ Android 后台使用 `connectedDevice` 前台服务与常驻通知。省电、Do
 
 也可以用 `python3 /opt/pocket-ledger/server.py --data /其他目录` 指定数据目录。手动查看 JSON 没有限制；迁移或修改文件时先停止服务。
 
-JSON 保存采用同目录临时文件、fsync 和原子替换，并串行处理并发请求。写入失败不会覆盖上一份完整账本。旧版 SQLite 会在首次启动时转换为 JSON，核对后将旧数据库归档到 `/opt/pocket-ledger/backups/`；本机转换已完成，账目、版本和配对配置均核对一致。
+JSON 文件使用同目录临时文件、fsync 和原子替换，并串行处理并发请求。跨月写入前会先保存隐藏的 `.pending-sync.json` 事务记录，完成后删除；中途断电或写入失败时，重启或下次访问会恢复完整操作，完成前不返回同步成功。这个临时文件不是日常存储格式，也不要在恢复前手动删除。
+
+旧版 SQLite 或单个 `ledger.json` 会自动迁移成月度文件，原文件归档到 `/opt/pocket-ledger/backups/`；本机月度迁移已完成，账目、版本和配对配置均核对一致。手机接口和全量同步协议保持兼容；拆分的是电脑文件，不改变 4 MiB 单次请求上限。
 
 这只是电脑副本的可迁移存储。手机可导出 JSON，但当前没有手机 JSON 导入/恢复界面；卸载手机应用前请先导出。
 
@@ -117,10 +132,12 @@ node --test tests/model.test.js
 
 工具默认位于 `/opt/android-sdk`、`/opt/gradle`、`/opt/gradle-cache`。其他机器需配置相应路径和签名密钥。APK 当前为调试签名侧载版；正式发行应保管独立发行签名。
 
-已通过 APK 构建与签名验证、Android 15 真机记账/编辑/删除/返回/属性菜单/统计测试、mDNS 替换失效 IP、保存时静默同步、离线保存及恢复后自动重试。服务端测试覆盖版本幂等、错误签名、旧版本拒绝、新属性、mDNS 签名绑定、JSON 写入失败保护、目录复制和旧数据库迁移。测试记录按独立 ID 删除，不修改已有账目。
+已通过 APK 构建与签名验证、Android 15 真机记账/编辑/删除/返回/属性菜单/统计测试、mDNS 替换失效 IP、保存时静默同步、离线保存及恢复后自动重试。服务端测试覆盖版本幂等、错误签名、旧版本拒绝、新属性、mDNS 签名绑定、JSON 写入失败保护、目录复制、旧数据库/单文件迁移、按月归档、跨月修改和中断恢复。测试记录按独立 ID 删除，不修改已有账目。
 
 `tests/device_mdns_sync.py` 需要已配对且解锁的手机、WebView CDP 端口 9228 和本机安装的正式服务，测试会短暂停止/恢复该服务并清理自己的记录。`tests/device_category_picker.py` 和 `tests/device_back_navigation.py` 使用 `ANDROID_SERIAL` 指定手机。
 
 Android Lint 因缺少 `intellij-core-31.9.2.jar` 和 `kotlin-compiler-31.9.2.jar` 未完成，未宣称静态检查全部通过。长期休眠、不同手机厂商和路由器策略仍需实机观察。
 
 布局参考 [Money Lover](https://moneylover.me/) 的流水和分类报告结构，中文界面、图标及配色为本项目实现。
+
+月度存储验证：12 项服务端测试通过；`tests/device_monthly_storage.py` 验证手机保存生成月度文件、修改日期后跨月移动、删除传播及现有账目保留。

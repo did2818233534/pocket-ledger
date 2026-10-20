@@ -7,6 +7,7 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import signal
@@ -54,13 +55,20 @@ class Store:
             with os.fdopen(fd, "w") as f:
                 json.dump({"key": secrets.token_hex(32)}, f)
         self.key = json.loads(config.read_text())["key"]
-        self.path = self.directory / "ledger.json"
+        self.path = self.directory / "sync.json"
+        self.pending = self.directory / ".pending-sync.json"
         self.lock = threading.RLock()
+        self._recover()
+        legacy_json = self.directory / "ledger.json"
+        legacy_sqlite = self.directory / "ledger.sqlite3"
         if not self.path.exists():
-            legacy = self.directory / "ledger.sqlite3"
             data = {"format": 1, "devices": [], "entries": []}
-            if legacy.exists():
-                with sqlite3.connect("file:" + str(legacy) + "?mode=ro", uri=True) as db:
+            if legacy_json.exists():
+                data = self._read_json(legacy_json)
+                if data.get("format") != 1:
+                    raise OSError("Unknown legacy JSON format")
+            elif legacy_sqlite.exists():
+                with sqlite3.connect("file:" + str(legacy_sqlite) + "?mode=ro", uri=True) as db:
                     if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                         raise OSError("Legacy database integrity check failed")
                     db.row_factory = sqlite3.Row
@@ -68,14 +76,22 @@ class Store:
                     data["entries"] = [dict(row) for row in db.execute("SELECT * FROM entries ORDER BY at DESC")]
             self._write(data)
             if self.export() != data:
-                raise OSError("JSON migration verification failed")
+                raise OSError("Monthly JSON migration verification failed")
+        # Also archive legacy files after recovery from an interrupted migration.
+        for legacy in (legacy_json, legacy_sqlite):
             if legacy.exists():
                 archive = self.directory.parent / "backups"
                 archive.mkdir(mode=0o700, exist_ok=True)
-                backup = archive / ("ledger-before-json-" + str(time.time_ns()) + ".sqlite3")
-                legacy.replace(backup)
+                legacy.replace(archive / ("ledger-before-monthly-" + str(time.time_ns()) + legacy.suffix))
 
-    def _write(self, data):
+    def _fsync_directory(self):
+        fd = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def _atomic_write(self, path, data):
         temporary = None
         try:
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.directory,
@@ -85,25 +101,76 @@ class Store:
                 file.write("\n")
                 file.flush()
                 os.fsync(file.fileno())
-            os.replace(temporary, self.path)
-            fd = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
+            os.replace(temporary, path)
+            self._fsync_directory()
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
 
+    @staticmethod
+    def _read_json(path):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, AttributeError) as error:
+            raise OSError("Cannot read ledger JSON; file preserved") from error
+
+    @staticmethod
+    def _valid_month(month):
+        return isinstance(month, str) and re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", month) is not None
+
+    def _write(self, data):
+        months = {}
+        for entry in data["entries"]:
+            month = entry["at"][:7]
+            if not self._valid_month(month):
+                raise ValueError("Noncanonical entry date")
+            months.setdefault(month, []).append(entry)
+        transaction = {"format": 1, "months": months,
+            "index": {"format": 2, "devices": data["devices"], "months": sorted(months)}}
+        # Durably record the complete operation before touching any monthly file.
+        self._atomic_write(self.pending, transaction)
+        self._recover()
+
+    def _recover(self):
+        if not self.pending.exists():
+            return
+        transaction = self._read_json(self.pending)
+        months, index = transaction.get("months"), transaction.get("index")
+        if (transaction.get("format") != 1 or not isinstance(months, dict)
+                or not all(self._valid_month(month) and isinstance(entries, list) for month, entries in months.items())
+                or not isinstance(index, dict) or index.get("format") != 2
+                or index.get("months") != sorted(months) or not isinstance(index.get("devices"), list)):
+            raise OSError("Invalid pending sync; data preserved")
+        for month, entries in months.items():
+            path = self.directory / (month + ".json")
+            value = {"month": month, "entries": entries}
+            if not path.exists() or self._read_json(path) != value:
+                self._atomic_write(path, value)
+        for path in self.directory.glob("*.json"):
+            if self._valid_month(path.stem) and path.stem not in months:
+                path.unlink()
+        self._atomic_write(self.path, index)
+        self.pending.unlink()
+        self._fsync_directory()
+
     def export(self):
         with self.lock:
-            try:
-                data = json.loads(self.path.read_text(encoding="utf-8"))
-                if data.get("format") != 1 or not isinstance(data.get("devices"), list) or not isinstance(data.get("entries"), list):
-                    raise ValueError("Invalid ledger format")
-                return data
-            except (ValueError, AttributeError) as error:
-                raise OSError("Cannot read ledger JSON; file preserved") from error
+            # Never expose a mixture of old and new months after a partial write.
+            self._recover()
+            index = self._read_json(self.path)
+            if (not isinstance(index, dict) or index.get("format") != 2
+                    or not isinstance(index.get("devices"), list) or not isinstance(index.get("months"), list)
+                    or not all(self._valid_month(month) for month in index["months"])):
+                raise OSError("Invalid sync metadata; data preserved")
+            entries = []
+            for month in index["months"]:
+                shard = self._read_json(self.directory / (month + ".json"))
+                if not isinstance(shard, dict) or shard.get("month") != month or not isinstance(shard.get("entries"), list):
+                    raise OSError("Invalid monthly ledger; data preserved")
+                entries.extend(shard["entries"])
+            entries.sort(key=lambda entry: entry["at"], reverse=True)
+            # Keep the existing combined export/API format for callers.
+            return {"format": 1, "devices": index["devices"], "entries": entries}
 
     def accept(self, data):
         device = str(uuid.UUID(data["device"]))

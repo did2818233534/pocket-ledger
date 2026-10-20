@@ -47,7 +47,8 @@ with sync_playwright() as p:
   print('PASS: offline save succeeds immediately with no failure popup',flush=True)
   service('start')
   s=wait_for(lambda s:s['revision']==s['syncedRevision'],75)
-  backed_up=json.loads((data_dir/'ledger.json').read_text())['entries']
+  index=json.loads((data_dir/'sync.json').read_text())
+  backed_up=[entry for month in index['months'] for entry in json.loads((data_dir/(month+'.json')).read_text())['entries']]
   for eid in created:assert sum(e['device']==s['device'] and e['id']==eid for e in backed_up)==1
   print('PASS: mDNS/automatic retry uploads pending records after computer service returns',flush=True)
  finally:
