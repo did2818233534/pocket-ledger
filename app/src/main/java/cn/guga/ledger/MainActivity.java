@@ -74,7 +74,16 @@ public class MainActivity extends Activity {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                 android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,backCallback);
         }
-        if (getSharedPreferences("sync",0).getBoolean("enabled",false)) startForegroundService(new Intent(this,SyncService.class));
+    }
+    @Override protected void onStart() {
+        super.onStart();web.onResume();web.resumeTimers();
+        SyncService.resumeSession();Tailnet.resume(this);
+        if(getSharedPreferences("sync",0).getBoolean("enabled",false))startForegroundService(new Intent(this,SyncService.class));
+        else SyncService.requestQuietly(this);
+    }
+    @Override protected void onStop() {
+        SyncService.pauseSession();stopService(new Intent(this,SyncService.class));Tailnet.suspend();
+        web.onPause();web.pauseTimers();super.onStop();
     }
     @Override protected void onResume() { super.onResume(); Tailnet.foreground=true; }
     @Override protected void onPause() { Tailnet.foreground=false; super.onPause(); }
@@ -92,11 +101,10 @@ public class MainActivity extends Activity {
         web.evaluateJavascript("typeof window.handleAppBack === 'function' ? window.handleAppBack() : 'loading'", value -> {
             if (isFinishing() || isDestroyed()) { handlingBack=false; return; }
             if (!"\"root\"".equals(value)) { handlingBack=false; return; }
-            boolean enabled = getSharedPreferences("sync",0).getBoolean("enabled",false);
-            new AlertDialog.Builder(this).setTitle("返回桌面？")
-                .setMessage(enabled ? "账目已保存在手机，自动同步会继续在后台运行。" : "账目已保存在手机。")
+            new AlertDialog.Builder(this).setTitle("退出小账？")
+                .setMessage("账目已保存在手机。退出后停止同步和远程连接，下次打开立即同步。")
                 .setNegativeButton("留在小账",(d,w)->{})
-                .setPositiveButton("返回桌面",(d,w)->moveTaskToBack(true))
+                .setPositiveButton("退出小账",(d,w)->finishAndRemoveTask())
                 .setOnDismissListener(d->handlingBack=false).show();
         });
     }
@@ -229,7 +237,7 @@ public class MainActivity extends Activity {
         }
         @JavascriptInterface public void sync() { SyncService.request(MainActivity.this); }
         @JavascriptInterface public void stop() {
-            getSharedPreferences("sync",0).edit().putBoolean("enabled",false).putString("status","后台检查已暂停，保存账目时仍会尝试同步").apply();
+            getSharedPreferences("sync",0).edit().putBoolean("enabled",false).putString("status","定时同步已暂停，打开应用或保存更改时仍会同步").apply();
             stopService(new Intent(MainActivity.this,SyncService.class));
         }
         @JavascriptInterface public void exportData() {

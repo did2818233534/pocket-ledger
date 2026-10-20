@@ -13,6 +13,8 @@ final class Tailnet {
     private static final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
     private static volatile String state = "{\"state\":\"Off\",\"peers\":[]}";
     private static boolean initialized;
+    private static volatile boolean active;
+    private static java.util.concurrent.ScheduledFuture<?> refreshTimer;
     static volatile boolean foreground;
     private static long lastRefresh;
     private static volatile String authURL = "";
@@ -22,13 +24,19 @@ final class Tailnet {
     static synchronized void init(Context context) {
         if (initialized) return;
         initialized = true; app = context.getApplicationContext();
-        worker.scheduleWithFixedDelay(() -> {
-            if (prefs().getBoolean("remoteEnabled",false) && (foreground || android.os.SystemClock.elapsedRealtime()-lastRefresh>=60000)) refresh();
-        },0,3,TimeUnit.SECONDS);
+    }
+    static synchronized void resume(Context context) {
+        init(context);if(active)return;active=true;
+        refreshTimer=worker.scheduleWithFixedDelay(()->{if(active&&prefs().getBoolean("remoteEnabled",false))refresh();},0,3,TimeUnit.SECONDS);
+    }
+    static synchronized void suspend() {
+        active=false;foreground=false;
+        if(refreshTimer!=null){refreshTimer.cancel(false);refreshTimer=null;}
+        worker.execute(()->{synchronized(Tailnet.class){try{Mobile.stop();}catch(Exception ignored){}state="{\"state\":\"Off\",\"peers\":[]}";}});
     }
     private static SharedPreferences prefs() { return app.getSharedPreferences("sync",0); }
     private static synchronized void start() throws Exception {
-        if(!prefs().getBoolean("remoteEnabled",false)) throw new Exception("远程同步已关闭");
+        if(!active||!prefs().getBoolean("remoteEnabled",false)) throw new Exception("远程同步已关闭");
         if(!binderReady) {
             Mobile.setNetworkBinder(fd -> {
                 android.net.ConnectivityManager cm=(android.net.ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -59,6 +67,7 @@ final class Tailnet {
         if(!raw.equals(lastNetwork)){Mobile.updateNetwork(raw);lastNetwork=raw;}
     }
     private static void refresh() {
+        if(!active)return;
         lastRefresh=android.os.SystemClock.elapsedRealtime();
         try { start(); state = Mobile.status(); authURL = new JSONObject(state).optString("authURL",""); }
         catch (Exception e) { state = "{\"state\":\"Error\",\"peers\":[]}"; }
@@ -111,7 +120,7 @@ final class Tailnet {
         if(proof.getInt("code")!=200 || !SyncService.sign(key,proofTime+"\n"+proof.getString("body")).equals(proof.optString("signature")) ||
             !challenge.equals(new JSONObject(proof.getString("body")).optString("challenge")))
             throw new Exception("远程电脑身份验证失败，请检查配对密钥与电脑服务版本");
-        if(!prefs().getBoolean("remoteEnabled",false))throw new Exception("远程同步已关闭");
+        if(!active||!prefs().getBoolean("remoteEnabled",false))throw new Exception("远程同步已关闭");
         return new JSONObject(Mobile.exchange(host,body,time,signature));
     }
 }
