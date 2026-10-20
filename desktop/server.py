@@ -35,6 +35,13 @@ def lan(ip):
         ipaddress.ip_network("192.168.0.0/16")))
 
 
+def sync_source_allowed(source, destination):
+    """Tailnet clients must arrive at this computer's tailnet address, not its LAN address."""
+    tailnet = ipaddress.ip_network("100.64.0.0/10")
+    return (lan(source) or source == "127.0.0.1" or
+            (ipaddress.ip_address(source) in tailnet and ipaddress.ip_address(destination) in tailnet))
+
+
 def addresses():
     try:
         data = json.loads(subprocess.check_output(["ip", "-j", "-4", "addr"], timeout=3))
@@ -233,9 +240,9 @@ def handler(store):
             self.wfile.write(body)
 
         def do_POST(self):
-            if not lan(self.client_address[0]) and self.client_address[0] != "127.0.0.1":
-                return self.reply(403, {"error": "LAN only"})
-            if self.path != "/sync":
+            if not sync_source_allowed(self.client_address[0], self.connection.getsockname()[0]):
+                return self.reply(403, {"error": "LAN or tailnet only"})
+            if self.path not in ("/sync", "/identity"):
                 return self.reply(404, {"error": "not found"})
             try:
                 length = int(self.headers.get("Content-Length", "0"))
@@ -248,7 +255,13 @@ def handler(store):
                 if not hmac.compare_digest(sign(store.key, timestamp + "\n" + body),
                                            self.headers.get("X-Signature", "")):
                     return self.reply(401, {"error": "invalid signature"})
-                result = store.accept(json.loads(body))
+                payload = json.loads(body)
+                if self.path == "/identity":
+                    challenge = payload.get("challenge", "") if isinstance(payload, dict) else ""
+                    if not isinstance(challenge, str) or not re.fullmatch(r"[a-f0-9]{32}", challenge):
+                        return self.reply(400, {"error": "invalid challenge"})
+                    return self.reply(200, {"challenge": challenge}, timestamp)
+                result = store.accept(payload)
                 self.reply(200, result, timestamp)
             except (ValueError, KeyError, TypeError, OverflowError):
                 self.reply(400, {"error": "invalid snapshot"})

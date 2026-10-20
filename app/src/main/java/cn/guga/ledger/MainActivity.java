@@ -13,6 +13,7 @@ public class MainActivity extends Activity {
     private android.window.OnBackInvokedCallback backCallback;
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        Tailnet.init(this);
         web = new WebView(this);
         if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0)
             WebView.setWebContentsDebuggingEnabled(true);
@@ -47,7 +48,7 @@ public class MainActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient() {
             public boolean onJsConfirm(WebView view,String url,String message,JsResult result) {
                 new AlertDialog.Builder(MainActivity.this).setMessage(message)
-                    .setPositiveButton(message.startsWith("确定删除") ? "删除" : "放弃修改",(d,w)->result.confirm())
+                    .setPositiveButton(message.startsWith("确定删除") ? "删除" : message.startsWith("退出 Tailscale") ? "退出账号" : "放弃修改",(d,w)->result.confirm())
                     .setNegativeButton("取消",(d,w)->result.cancel())
                     .setOnCancelListener(d->result.cancel()).show();
                 return true;
@@ -73,6 +74,8 @@ public class MainActivity extends Activity {
         }
         if (getSharedPreferences("sync",0).getBoolean("enabled",false)) startForegroundService(new Intent(this,SyncService.class));
     }
+    @Override protected void onResume() { super.onResume(); Tailnet.foreground=true; }
+    @Override protected void onPause() { Tailnet.foreground=false; super.onPause(); }
     @Override public void onBackPressed() { handleBack(); }
     private void handleBack() {
         if (handlingBack) return;
@@ -111,7 +114,10 @@ public class MainActivity extends Activity {
                 return data.put("host",p.getString("host","")).put("paired",!p.getString("key","").isEmpty())
                     .put("enabled",p.getBoolean("enabled",false)).put("status",p.getString("status","尚未连接电脑"))
                     .put("lastSync",p.getLong("lastSync",0)).put("lastDiscovery",p.getLong("lastDiscovery",0))
-                    .put("syncedRevision",p.getLong("syncedRevision",-1)).toString();
+                    .put("syncedRevision",p.getLong("syncedRevision",-1))
+                    .put("remoteEnabled",p.getBoolean("remoteEnabled",false)).put("remoteHost",p.getString("remoteHost",""))
+                    .put("lastRoute",p.getString("lastRoute",""))
+                    .put("tailnet",new JSONObject(Tailnet.status())).toString();
             } catch(Exception e) { return "{\"error\":\"读取账本失败\"}"; }
         }
         @JavascriptInterface public String save(String data) {
@@ -124,7 +130,8 @@ public class MainActivity extends Activity {
         }
         @JavascriptInterface public String configure(String host, String key) {
             try {
-                SyncService.validateEndpoint(host);
+                if (!host.isEmpty() || !Tailnet.validHost(getSharedPreferences("sync",0).getString("remoteHost","")))
+                    SyncService.validateEndpoint(host);
                 if (key.isEmpty()) key = getSharedPreferences("sync",0).getString("key","");
                 if (!key.matches("[a-f0-9]{64}")) return "请输入电脑生成的 64 位配对密钥";
                 getSharedPreferences("sync",0).edit().putString("host",host).putString("key",key).putBoolean("enabled",true).commit();
@@ -135,6 +142,35 @@ public class MainActivity extends Activity {
                 });
                 return "";
             } catch(Exception e) { return "请输入 .local 主机名或局域网 IPv4 地址，例如 guga.local"; }
+        }
+        @JavascriptInterface public void showLicenses() {
+            runOnUiThread(() -> {
+                try (java.io.InputStream input=getAssets().open("tailscale-notices.txt")) {
+                    java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();byte[] buffer=new byte[4096];int n;
+                    while((n=input.read(buffer))!=-1)out.write(buffer,0,n);
+                    android.widget.TextView text=new android.widget.TextView(MainActivity.this);
+                    text.setText(out.toString("UTF-8"));text.setTextSize(12);text.setPadding(24,16,24,16);text.setTextIsSelectable(true);
+                    android.widget.ScrollView scroll=new android.widget.ScrollView(MainActivity.this);scroll.addView(text);
+                    new AlertDialog.Builder(MainActivity.this).setTitle("开源许可").setView(scroll).setPositiveButton("关闭",null).show();
+                } catch(Exception ignored) {}
+            });
+        }
+        @JavascriptInterface public void enableRemote() { Tailnet.enable(MainActivity.this); }
+        @JavascriptInterface public void loginRemote() { Tailnet.login(MainActivity.this); }
+        @JavascriptInterface public String openRemoteLogin() {
+            String url=Tailnet.loginURL();
+            if(url.isEmpty()) return "登录链接正在准备，请稍候重试";
+            runOnUiThread(() -> {
+                try { startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))); }
+                catch(Exception e) { android.widget.Toast.makeText(MainActivity.this,"请先安装手机浏览器",0).show(); }
+            });
+            return "";
+        }
+        @JavascriptInterface public void disableRemote(boolean logout) { Tailnet.disable(MainActivity.this,logout); }
+        @JavascriptInterface public String selectRemote(String host) {
+            if(!Tailnet.validHost(host)) return "请选择 Tailscale 网络中的电脑";
+            getSharedPreferences("sync",0).edit().putString("remoteHost",host).apply();
+            SyncService.requestQuietly(MainActivity.this);return "";
         }
         @JavascriptInterface public void sync() { SyncService.request(MainActivity.this); }
         @JavascriptInterface public void stop() {

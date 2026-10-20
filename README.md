@@ -1,6 +1,6 @@
 # 小账 · 安卓本地记账
 
-安卓手机离线记账，SQLite 保存手机账目；电脑通过局域网接收完整副本，使用可直接阅读和复制的 JSON 文件保存。无需云端。
+安卓手机离线记账，SQLite 保存手机账目；电脑通过局域网或可选的内置 Tailscale 接收完整副本，使用可直接阅读和复制的 JSON 文件保存。账本不上传云端存储；Tailscale 的账号协调和加密中继使用其网络服务。
 
 ## 目录
 
@@ -13,7 +13,7 @@
 | 同步版本和月份索引 | `/opt/pocket-ledger/data/sync.json` |
 | 配对配置 | `/opt/pocket-ledger/data/config.json` |
 | 旧数据库 / 单文件 JSON 备份 | `/opt/pocket-ledger/backups/` |
-| 手机安装包（不提交 Git） | `dist/小账-1.0.0.apk` |
+| 手机安装包（不提交 Git） | `dist/小账-1.1.0.apk` |
 
 电脑运行程序及数据不依赖源码目录。用户级 systemd 配置保存在 `~/.config/systemd/user/pocket-ledger.service`，启动的是 `/opt/pocket-ledger/server.py`。已为本机用户开启 linger，使服务可以开机启动而无需桌面登录。
 
@@ -28,6 +28,24 @@
 手机每次新增或编辑账目，**先写入本地数据库，再后台尝试同步**。电脑不在线、网络错误或同步失败不会弹窗，也不会影响保存；下次发现电脑、每分钟检查或手动同步会重试。删除同样同步到电脑。
 
 “暂停后台检查”只暂停持续的 mDNS 发现与一分钟定时检查。只要已经配对，每次保存仍会尝试同步，也能手动点击“立即同步”。手动同步失败会在同步页显示原因，便于排查。
+
+## 可选的 Tailscale 远程同步
+
+不登录、不启用远程同步时，应用不启动 Tailscale，局域网功能照常使用。
+
+1. 电脑安装并登录 Tailscale，保留现有的小账同步服务。本机已有客户端，无需重装或改变其登录配置。
+2. 手机打开“同步 → 远程同步 → 开启 Tailscale 远程同步”，等待登录链接后点击“前往 Tailscale 登录”。官方认证在手机浏览器完成，返回小账即可；不在电脑打开窗口。
+3. 登录电脑所在的 tailnet。内置客户端以独立节点 `pocket-ledger` 出现在网络中；如果网络要求审批，请在管理页面批准该节点。
+4. 在小账的设备列表中选择运行小账服务的电脑。电脑离线仍可选择并保留地址，网络访问策略须允许该节点访问电脑 TCP 47831。
+5. 配对密钥仍是必需项。已配对用户不必重新输入；身份和数据完整性继续通过请求、响应 HMAC 验证。
+
+每次同步先尝试局域网，无法完成后才尝试内置 Tailscale。`.local` / mDNS 只用于局域网，远程连接使用选择的 Tailscale IPv4。成功状态显示本次使用的连接方式。保存、编辑、删除和一分钟后台检查都复用同一策略；自动失败不弹窗。
+
+“关闭远程同步”停止内置节点但保留手机私有目录中的登录状态，再开启可恢复；“退出 Tailscale 账号”联网注销当前节点，之后重新登录。注销失败会明确提示，不能当作已注销。退出和关闭都不影响本地账目及局域网配对。电脑端程序接受 tailnet 来源时还要求请求到达本机 tailnet 地址，不向公共互联网开放无需认证的同步入口。
+
+实现：使用上游 `tailscale.com/tsnet v1.104.1`，Go / gomobile 编译为 Android 原生库，Java 提供网络接口信息和登录 UI。没有单独启动外部 Tailscale App，也不使用 Android VpnService 接管其他应用流量。实际安卓 ABI 为 arm64-v8a 和 x86_64；不支持仅 32 位的手机。Tailscale 身份数据在 `getNoBackupFilesDir()/tailscale`，不进入账本导出或系统备份。上游及实际依赖的许可包含在应用“关于内置 Tailscale → 开源许可”。
+
+手机进程被强行停止、系统休眠或后台限制仍可能暂停自动检查，重新打开小账可恢复。远程同步要求电脑开机联网，不能唤醒已关机的电脑。
 
 ## 界面和统计
 
@@ -57,7 +75,7 @@
 
 首次配对仍需要密钥。mDNS 负责发现，不代替身份校验；密钥不会通过发现消息发送。HTTP 请求与响应也使用 HMAC-SHA256，要求两端时间差在 120 秒以内。
 
-仅支持 RFC1918 私有 IPv4 局域网，不使用公网或 IPv6-only 网络。若有防火墙，需允许可信局域网的 TCP 47831 和 mDNS UDP 5353。访客 Wi-Fi、AP 隔离或 VPN 可能影响发现；保存的电脑地址仍可作为连接入口。`.local` 地址能否直接解析取决于手机系统，服务发现会使用解析出的局域网 IPv4 地址。
+局域网直连支持 RFC1918 私有 IPv4。远程同步使用 Tailscale 的 100.64.0.0/10 节点地址，底层可经互联网直连或加密中继。若有防火墙，需允许可信局域网的 TCP 47831 和 mDNS UDP 5353。访客 Wi-Fi、AP 隔离或 VPN 可能影响发现；保存的电脑地址仍可作为连接入口。`.local` 地址能否直接解析取决于手机系统，服务发现会使用解析出的局域网 IPv4 地址。
 
 **局域网 HTTP 内容未加密**，请使用可信网络。配对配置和账本文件限制为当前用户读写。手机关闭了系统自动备份。
 
@@ -119,7 +137,11 @@ systemctl --user start pocket-ledger
 仓库：`git@github.com:did2818233534/pocket-ledger.git`，分支 `main`。`.gitignore` 排除构建缓存、APK、截图、数据库、配对配置、签名文件和本地工具路径。
 
 ```bash
-# 使用本机已有 SDK 直接构建，无需下载 Gradle 依赖
+# 首次构建内置 Tailscale（Go、gomobile 和 Android NDK）
+source /opt/pocket-ledger/toolchain/env.sh
+bash build-tailscale.sh
+
+# 使用已有 SDK 构建 APK，无需 Gradle
 bash build-apk.sh
 
 # 标准 Gradle 构建
@@ -130,7 +152,7 @@ python3 -m unittest discover -s tests -v
 node --test tests/model.test.js
 ```
 
-工具默认位于 `/opt/android-sdk`、`/opt/gradle`、`/opt/gradle-cache`。其他机器需配置相应路径和签名密钥。APK 当前为调试签名侧载版；正式发行应保管独立发行签名。
+工具默认位于 `/opt/android-sdk`、`/opt/gradle`、`/opt/gradle-cache`；Go/gomobile 与缓存位于 `/opt/pocket-ledger/toolchain`，NDK 位于 `/opt/android-sdk/ndk/29.0.14206865`。上游 Go 依赖固定在 `mobiletailscale/go.mod` / `go.sum`。修改 Go 代码后需重新执行 `build-tailscale.sh`。其他机器需配置相应路径和签名密钥。APK 当前为调试签名侧载版；正式发行应保管独立发行签名。
 
 已通过 APK 构建与签名验证、Android 15 真机记账/编辑/删除/返回/属性菜单/统计测试、mDNS 替换失效 IP、保存时静默同步、离线保存及恢复后自动重试。服务端测试覆盖版本幂等、错误签名、旧版本拒绝、新属性、mDNS 签名绑定、JSON 写入失败保护、目录复制、旧数据库/单文件迁移、按月归档、跨月修改和中断恢复。测试记录按独立 ID 删除，不修改已有账目。
 
@@ -141,3 +163,11 @@ Android Lint 因缺少 `intellij-core-31.9.2.jar` 和 `kotlin-compiler-31.9.2.ja
 布局参考 [Money Lover](https://moneylover.me/) 的流水和分类报告结构，中文界面、图标及配色为本项目实现。
 
 月度存储验证：12 项服务端测试通过；`tests/device_monthly_storage.py` 验证手机保存生成月度文件、修改日期后跨月移动、删除传播及现有账目保留。
+
+远程同步验证脚本：`tests/device_tailscale_sync.py` 需要手机已登录电脑所在的 Tailscale 网络。它会短暂重启手机应用，仅调整连接配置以暂停 mDNS、暂设不可达局域网地址，验证 Tailscale 后备路径，以及编辑、删除、关闭后静默离线保存、重新开启和手动补同步；结束时恢复连接设置并仅清理自己的记录。此测试不切换手机 Wi-Fi 或移动数据，不等同于在外地蜂窝网络实测。
+
+内置库支持 Wi-Fi / 移动网络变化，并将 Go 网络连接绑定到 Android 当前网络，以兼容手机现有 VPN。首次连接 Tailscale 可能需要等待登录链接生成；不应反复点击获取。账号登录由用户在官方手机网页完成。
+
+本次 v1.1.0 验证：14 项服务端测试、4 项统计测试和 Go 地址限制测试通过；已在已登录的 Android 15 手机上验证局域网优先、Tailscale 后备同步、新增/编辑/删除、关闭远程后静默保存、重新开启保留登录及手动补同步。临时记录和测试连接设置均已清理。`tests/device_computer_picker.py` 验证电脑菜单紧贴输入框下拉、名称不显示 IP、在线/离线/待确认/登录过期状态点，以及系统返回键先收起菜单。
+
+远程通道发送账本前，会向 `/identity` 发起随机挑战并验证电脑的配对签名，再发送 `/sync`，避免把账本内容发送到选错的设备。配对密钥不随请求传输。电脑身份握手与同步均受 Tailscale 网络加密保护；局域网模式沿用现有协议。

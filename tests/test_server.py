@@ -29,6 +29,38 @@ class SyncTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_identity_probe_is_signed_and_never_changes_ledger(self):
+        self.store.accept(self.data)
+        before = self.store.export()
+        server = s.ThreadingHTTPServer(("127.0.0.1", 0), s.handler(self.store))
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            body = json.dumps({"challenge": uuid.uuid4().hex})
+            ts = str(int(time.time()))
+            request = urllib.request.Request(f"http://127.0.0.1:{server.server_port}/identity", body.encode(),
+                {"X-Time": ts, "X-Signature": s.sign(self.store.key, ts + "\n" + body)})
+            with urllib.request.urlopen(request) as response:
+                reply = response.read().decode()
+                self.assertEqual(json.loads(reply), json.loads(body))
+                self.assertEqual(response.headers["X-Signature"], s.sign(self.store.key, ts + "\n" + reply))
+            request.headers["X-signature"] = "wrong"
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(request)
+            self.assertEqual(error.exception.code, 401)
+            self.assertEqual(self.store.export(), before)
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
+
+    def test_tailnet_requires_tailnet_destination(self):
+        self.assertTrue(s.sync_source_allowed("192.168.1.2", "192.168.1.3"))
+        self.assertTrue(s.sync_source_allowed("127.0.0.1", "127.0.0.1"))
+        self.assertTrue(s.sync_source_allowed("100.64.0.1", "100.77.91.15"))
+        self.assertTrue(s.sync_source_allowed("100.127.255.254", "100.77.91.15"))
+        self.assertFalse(s.sync_source_allowed("100.64.0.1", "192.168.1.3"))
+        for source in ("8.8.8.8", "100.63.255.255", "100.128.0.1"):
+            self.assertFalse(s.sync_source_allowed(source, "100.77.91.15"))
+
     def test_create_edit_delete_idempotent_and_stale(self):
         self.store.accept(self.data)
         self.store.accept(self.data)

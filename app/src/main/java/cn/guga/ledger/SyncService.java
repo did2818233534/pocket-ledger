@@ -48,10 +48,42 @@ public class SyncService extends Service {
         requests.execute(() -> synchronize(c, quiet));
     }
     private static void synchronize(Context c, boolean quiet) {
-        SharedPreferences p = c.getSharedPreferences("sync",0);
-        String key = p.getString("key",""), host = p.getString("host","");
-        if (key.isEmpty()) { if (!quiet) p.edit().putString("status","请先配对电脑").apply(); return; }
-        HttpURLConnection conn = null;
+        SharedPreferences p=c.getSharedPreferences("sync",0);
+        String key=p.getString("key","");
+        if(key.isEmpty()){if(!quiet)p.edit().putString("status","请先配对电脑").apply();return;}
+        try {
+            JSONObject snapshot=LedgerDb.get(c).snapshot();
+            String body=snapshot.toString(), timestamp=Long.toString(System.currentTimeMillis()/1000);
+            String signature=sign(key,timestamp+"\n"+body),route="局域网";
+            JSONObject response;
+            try {
+                response=exchangeLan(c,p.getString("host",""),body,timestamp,signature);
+                verify(response,key,timestamp,snapshot.getLong("revision"));
+            } catch(Exception lanError) {
+                if(!p.getBoolean("remoteEnabled",false)||p.getString("remoteHost","").isEmpty())throw lanError;
+                Tailnet.init(c);
+                response=Tailnet.exchange(p.getString("remoteHost",""),body,timestamp,signature,key);
+                verify(response,key,timestamp,snapshot.getLong("revision"));
+                route="Tailscale";
+            }
+            p.edit().putLong("lastSync",System.currentTimeMillis()).putLong("syncedRevision",snapshot.getLong("revision"))
+                .putString("lastRoute",route).putString("status","已通过"+route+"同步到电脑").apply();
+        } catch(Exception e) {
+            String message=e.getMessage();
+            if(e instanceof java.io.IOException)message="电脑暂时离线，账目已保存在手机";
+            p.edit().putString("status",quiet?"账目已保存，等待下次同步":message==null?"等待电脑上线":message).apply();
+        }
+    }
+    private static void verify(JSONObject response,String key,String timestamp,long revision) throws Exception {
+        int code=response.getInt("code");
+        if(code==401)throw new Exception("配对失败：请检查密钥和两端时间");
+        if(code!=200)throw new Exception("同步未完成（"+code+"），手机数据保留");
+        String reply=response.getString("body");
+        if(!sign(key,timestamp+"\n"+reply).equals(response.optString("signature")))throw new Exception("电脑身份校验失败");
+        if(new JSONObject(reply).getLong("revision")!=revision)throw new Exception("版本校验失败");
+    }
+    private static JSONObject exchangeLan(Context c,String host,String body,String timestamp,String signature) throws Exception {
+        HttpURLConnection conn=null;
         try {
             ConnectivityManager cm = (ConnectivityManager)c.getSystemService(CONNECTIVITY_SERVICE);
             Network network = cm.getActiveNetwork();
@@ -78,15 +110,12 @@ public class SyncService extends Service {
                 host = resolved;
             }
             validateHost(host);
-            JSONObject snapshot = LedgerDb.get(c).snapshot();
-            String body = snapshot.toString();
-            String timestamp = Long.toString(System.currentTimeMillis()/1000);
             conn = (HttpURLConnection)network.openConnection(new URL("http://"+host+":47831/sync"));
-            conn.setConnectTimeout(3500); conn.setReadTimeout(5000); conn.setInstanceFollowRedirects(false);
+            conn.setConnectTimeout(2500); conn.setReadTimeout(5000); conn.setInstanceFollowRedirects(false);
             conn.setRequestMethod("POST"); conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type","application/json");
             conn.setRequestProperty("X-Time",timestamp);
-            conn.setRequestProperty("X-Signature",sign(key,timestamp+"\n"+body));
+            conn.setRequestProperty("X-Signature",signature);
             byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
             conn.setFixedLengthStreamingMode(bytes.length);
             try (java.io.OutputStream out = conn.getOutputStream()) { out.write(bytes); }
@@ -102,24 +131,16 @@ public class SyncService extends Service {
                 }
                 reply = out.toString("UTF-8");
             }
-            if (!sign(key,timestamp+"\n"+reply).equals(conn.getHeaderField("X-Signature"))) throw new Exception("电脑身份校验失败");
-            JSONObject result = new JSONObject(reply);
-            if (result.getLong("revision")!=snapshot.getLong("revision")) throw new Exception("版本校验失败");
-            p.edit().putLong("lastSync",System.currentTimeMillis()).putLong("syncedRevision",snapshot.getLong("revision"))
-                .putString("status","已与电脑同步").apply();
-        } catch(Exception e) {
-            String message = e.getMessage();
-            if (e instanceof java.io.IOException) message = "电脑暂时离线，账目已保存在手机";
-            p.edit().putString("status",quiet ? "账目已保存，等待下次同步" : message == null ? "等待电脑上线" : message).apply();
-        } finally { if (conn!=null) conn.disconnect(); }
+            return new JSONObject().put("code",status).put("body",reply).put("signature",conn.getHeaderField("X-Signature"));
+        } finally { if(conn!=null)conn.disconnect(); }
     }
     public void onCreate() {
-        super.onCreate(); running = true;
+        super.onCreate(); running = true; Tailnet.init(this);
         NotificationManager nm = getSystemService(NotificationManager.class);
-        nm.createNotificationChannel(new NotificationChannel("sync","局域网同步",NotificationManager.IMPORTANCE_LOW));
+        nm.createNotificationChannel(new NotificationChannel("sync","账本同步",NotificationManager.IMPORTANCE_LOW));
         PendingIntent launch = PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE);
         Notification note = new Notification.Builder(this,"sync").setSmallIcon(cn.guga.ledger.R.drawable.ic_ledger)
-            .setContentTitle("小账 · 局域网同步").setContentText("每分钟检查电脑，账目始终保存在手机")
+            .setContentTitle("小账 · 自动同步").setContentText("每分钟检查电脑，账目始终保存在手机")
             .setContentIntent(launch).setOngoing(true).build();
         startForeground(1,note);
         timer = Executors.newSingleThreadScheduledExecutor();
