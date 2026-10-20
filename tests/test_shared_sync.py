@@ -12,10 +12,11 @@ class SharedSyncTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.store=s.Store(self.tmp.name)
         self.a,self.b=str(uuid.uuid4()),str(uuid.uuid4())
-        self.users=[dict(id=uid,name=name,version=1,actor=TEST_USERS[0]) for uid,name in zip(TEST_USERS,('用户一','用户二'))]
+        self.users=[dict(id=uid,name=name,nameAt=1,avatar='',avatarAt=0) for uid,name in zip(TEST_USERS,('用户一','用户二'))]
     def tearDown(self):self.tmp.cleanup()
     def packet(self,device,records,revision=1,users=None):
-        return dict(protocol=2,device=device,revision=revision,records=records,users=users or copy.deepcopy(self.users))
+        profiles=users or copy.deepcopy(self.users)
+        return dict(protocol=4,device=device,revision=revision,subscriptions=[u["id"] for u in profiles],records=records,users=profiles)
     def row(self,actor,owner=None,version=3,**kw):
         return dict(id=str(uuid.uuid4()),amount=123,at='2026-10-20T12:00',category='daily',note='测试',owner=owner or TEST_USERS[0],version=version,actor=actor,deleted=False,**kw)
     def test_two_devices_both_users_cross_edit_delete_and_stale_replay(self):
@@ -42,7 +43,7 @@ class SharedSyncTests(unittest.TestCase):
                 for e in rows:store.accept(self.packet(e['actor'],[e]))
                 self.assertEqual(store.export()['entries'],[expected])
     def test_rename_users_syncs_independently_of_entries(self):
-        users=copy.deepcopy(self.users);users[1].update(name='小明',version=2,actor=self.b)
+        users=copy.deepcopy(self.users);users[1].update(name='小明',nameAt=2)
         self.store.accept(self.packet(self.b,[],users=users))
         reply=self.store.accept(self.packet(self.a,[]))
         self.assertEqual(reply['users'][1]['name'],'小明')
@@ -57,17 +58,85 @@ class SharedSyncTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.store.accept(dict(device=self.a,revision=9,entries=[]))
         self.assertEqual(len(self.store.export()['entries']),2)
     def test_add_more_users_and_sync_arbitrary_owner(self):
-        uid=str(uuid.uuid4());third=dict(id=uid,name='第三位用户',version=4,actor=self.a)
+        uid=str(uuid.uuid4());third=dict(id=uid,name='第三位用户',nameAt=4,avatar='',avatarAt=0)
         profiles=self.users+[third];row=self.row(self.a,uid)
         self.store.accept(self.packet(self.a,[row],users=profiles))
-        reply=self.store.accept(self.packet(self.b,[]))
+        reply=self.store.accept(self.selective(self.b,list(TEST_USERS)+[uid]))
         self.assertEqual(len(reply['users']),3)
         self.assertEqual(reply['records'][0]['owner'],uid)
-        uid4=str(uuid.uuid4());fourth=dict(id=uid4,name='第四位用户',version=5,actor=self.b)
+        uid4=str(uuid.uuid4());fourth=dict(id=uid4,name='第四位用户',nameAt=5,avatar='',avatarAt=0)
         # Two phones add people offline; neither may drop the other's profile.
         reply=self.store.accept(self.packet(self.b,[],users=self.users+[fourth]))
-        self.assertEqual({u['id'] for u in reply['users']},set(TEST_USERS)|{uid,uid4})
+        self.assertEqual({u['id'] for u in self.store.export()['users']},set(TEST_USERS)|{uid,uid4})
         with self.assertRaises(ValueError):self.store.accept(self.packet(self.a,[],users=profiles+[third]))
+
+    def selective(self, device, subscriptions, records=None, profiles=None):
+        return dict(protocol=4,device=device,revision=1,subscriptions=subscriptions,users=profiles or [],records=records or [])
+    def test_scoped_join_rename_missing_id_and_same_name_different_identity(self):
+        x,y=self.row(self.a),self.row(self.b,TEST_USERS[1])
+        self.store.accept(self.packet(self.a,[x,y]))
+        before=self.store.export()
+        only=self.store.accept(self.selective(self.b,[TEST_USERS[0]]))
+        self.assertEqual([u['id'] for u in only['users']],[TEST_USERS[0]])
+        self.assertEqual([e['id'] for e in only['records']],[x['id']])
+        renamed=copy.deepcopy(self.users);renamed[0].update(name='改名后',nameAt=5)
+        self.store.accept(self.selective(self.a,[TEST_USERS[0]],[x],[renamed[0]]))
+        again=self.store.accept(self.selective(self.b,[TEST_USERS[0]]))
+        self.assertEqual(again['users'][0]['name'],'改名后')
+        self.assertEqual(again['users'][0]['id'],TEST_USERS[0])
+        unknown=str(uuid.uuid4());missing=self.store.accept(self.selective(self.b,[unknown]))
+        self.assertEqual(missing['missingUsers'],[unknown]);self.assertEqual(missing['users'],[]);self.assertEqual(missing['records'],[])
+        self.assertNotIn(unknown,[u['id'] for u in self.store.export()['users']])
+        all_users=self.store.accept(self.selective(self.b,list(TEST_USERS)))
+        self.assertEqual(len(all_users['records']),2)
+        self.assertEqual(len(before['entries']),len(self.store.export()['entries']))
+    def test_scoped_owner_change_does_not_leak_other_users_data(self):
+        row=self.row(self.a);self.store.accept(self.packet(self.a,[row]))
+        moved={**row,'owner':TEST_USERS[1],'version':4,'actor':self.b}
+        self.store.accept(self.packet(self.b,[moved]))
+        reply=self.store.accept(self.selective(self.a,[TEST_USERS[0]],[row],[self.users[0]]))
+        self.assertEqual(reply['records'],[])
+        self.assertEqual(reply['outOfScope'],[{k:moved[k] for k in ('id','version','actor')}])
+        with self.assertRaises(ValueError):self.store.accept(self.selective(self.a,[TEST_USERS[0]],[moved],self.users))
+        self.assertEqual(self.store.export()['entries'][0]['owner'],TEST_USERS[1])
+
+    def test_avatar_latest_only_independent_of_name_and_scoped_download(self):
+        import base64
+        old_image=base64.b64encode(b'\xff\xd8old\xff\xd9').decode()
+        new_image=base64.b64encode(b'\xff\xd8new\xff\xd9').decode()
+        profile={**self.users[0],'avatar':old_image,'avatarAt':100}
+        self.store.accept(self.selective(self.a,[profile['id']],profiles=[profile]))
+        newer={**profile,'avatar':new_image,'avatarAt':200}
+        self.store.accept(self.selective(self.b,[profile['id']],profiles=[newer]))
+        # A concurrent rename carries an older avatar: merge each independently.
+        renamed={**profile,'name':'新名字','nameAt':4}
+        reply=self.store.accept(self.selective(self.a,[profile['id']],profiles=[renamed]))
+        self.assertEqual(reply['users'][0]['avatar'],new_image);self.assertEqual(reply['users'][0]['name'],'新名字')
+        self.assertNotIn(old_image,self.store.path.read_text())
+        self.assertEqual(self.store.accept(self.selective(self.b,[TEST_USERS[1]]))['users'],[])
+        cleared={**renamed,'avatar':'','avatarAt':300}
+        self.store.accept(self.selective(self.a,[profile['id']],profiles=[cleared]))
+        reply=self.store.accept(self.selective(self.b,[profile['id']],profiles=[newer]))
+        self.assertEqual(reply['users'][0]['avatar'],'');self.assertEqual(reply['users'][0]['avatarAt'],300)
+        self.assertNotIn(new_image,self.store.path.read_text())
+        with self.assertRaises(ValueError):self.store.accept(self.selective(self.a,[profile['id']],profiles=[{**cleared,'avatar':'not-jpeg'}]))
+
+    def test_identity_uses_current_value_and_timestamp_only(self):
+        newer={**self.users[0],'name':'最新名字','nameAt':500}
+        older={**self.users[0],'name':'旧名字','nameAt':100}
+        self.store.accept(self.selective(self.a,[newer['id']],profiles=[newer]))
+        reply=self.store.accept(self.selective(self.b,[older['id']],profiles=[older]))
+        self.assertEqual(reply['users'][0]['name'],'最新名字')
+        self.assertEqual(set(reply['users'][0]),{'id','name','nameAt','avatar','avatarAt'})
+        self.assertNotIn('旧名字',self.store.path.read_text())
+        self.assertFalse(self.store.pending.exists())
+
+    def test_equal_name_timestamp_uses_android_utf16_order(self):
+        first={**self.users[0],'name':'😀','nameAt':500}
+        second={**self.users[0],'name':'\ue000','nameAt':500}
+        for profile in (first,second,first):
+            self.store.accept(self.selective(self.a,[profile['id']],profiles=[profile]))
+        self.assertEqual(self.store.export()['users'][0]['name'],'\ue000')
 
     def test_bad_user_or_mutation_is_atomic(self):
         row=self.row(self.a);self.store.accept(self.packet(self.a,[row]));before=self.store.export()

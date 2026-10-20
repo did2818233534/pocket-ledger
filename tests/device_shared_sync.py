@@ -10,7 +10,7 @@ def disk():
     return [r for file in root.glob('????-??.json') for r in json.loads(file.read_text())['entries']]
 def users():return json.loads((root/'sync.json').read_text())['users']
 def exchange(records,profiles=None):
-    body=json.dumps(dict(protocol=2,device=actor,revision=1,users=profiles or users(),records=records),ensure_ascii=False).encode()
+    body=json.dumps(dict(protocol=4,device=actor,revision=1,subscriptions=[u["id"] for u in (profiles or users())],users=profiles or users(),records=records),ensure_ascii=False).encode()
     ts=str(int(time.time()));signature=hmac.new(key.encode(),ts.encode()+b'\n'+body,hashlib.sha256).hexdigest()
     request=urllib.request.Request('http://127.0.0.1:47831/sync',body,{'X-Time':ts,'X-Signature':signature})
     with urllib.request.urlopen(request,timeout=10) as response:
@@ -77,7 +77,7 @@ with sync_playwright() as p:
         assert page.evaluate('(e)=>Native.save(JSON.stringify(e))',b_local)==''
         flush();remote=exchange([]);assert next(e for e in remote['records'] if e['id']==ids[1])['amount']==404
         # Rename and download, then restore original name in finally.
-        profiles=users();profiles[1].update(name='验证用户',version=max(e['version'] for e in remote['records'])+1,actor=actor)
+        profiles=users();profiles[1].update(name='验证用户',nameAt=int(time.time()*1000))
         exchange([],profiles);flush();assert state()['users'][1]['name']=='验证用户'
         print('PASS: cross-device editing, changing owner and profile-name synchronization')
         page.evaluate('(id)=>Native.remove(id)',ids[0]);flush()

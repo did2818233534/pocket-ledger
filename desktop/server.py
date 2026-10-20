@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Shared offline ledger sync server with durable monthly JSON storage."""
 import argparse
+import base64
+import binascii
 import datetime as dt
 import hashlib
 import hmac
@@ -85,6 +87,11 @@ class Store:
             self._write(data)
             if self.export() != data:
                 raise OSError("Monthly JSON migration verification failed")
+        current = self.export()
+        if "users" in current and any("version" in u or "actor" in u for u in current["users"]):
+            current["users"] = [{"id":u["id"], "name":u["name"], "nameAt":u.get("nameAt",0),
+                                 "avatar":u.get("avatar",""), "avatarAt":u.get("avatarAt",0)} for u in current["users"]]
+            self._write(current)
         # Also archive legacy files after recovery from an interrupted migration.
         for legacy in (legacy_json, legacy_sqlite):
             if legacy.exists():
@@ -182,13 +189,13 @@ class Store:
             # Keep the existing combined export/API format for callers.
             result = {"format": 1, "devices": index["devices"], "entries": entries}
             if "users" in index:
-                result.update(users=index["users"], legacyDevices=index.get("legacyDevices", []), protocol=2)
+                result.update(users=index["users"], legacyDevices=index.get("legacyDevices", []), protocol=4)
             return result
 
     def accept(self, data):
         if not isinstance(data, dict):
             raise ValueError("invalid sync object")
-        if data.get("protocol") == 2:
+        if data.get("protocol") == 4:
             return self.merge(data)
         with self.lock:
             if "users" in self.export():
@@ -205,24 +212,55 @@ class Store:
             raise ValueError("noncanonical actor")
         return version, actor
 
+    @staticmethod
+    def avatar(row):
+        image, timestamp = row.get("avatar", ""), row.get("avatarAt", 0)
+        if not isinstance(image, str) or len(image) > 90000 or type(timestamp) is not int or not 0 <= timestamp < 2**53 - 1:
+            raise ValueError("invalid avatar")
+        if image:
+            try:
+                raw = base64.b64decode(image, validate=True)
+            except binascii.Error as error:
+                raise ValueError("invalid avatar encoding") from error
+            if len(raw) > 65536 or not raw.startswith(b"\xff\xd8") or not raw.endswith(b"\xff\xd9") or timestamp == 0:
+                raise ValueError("invalid avatar image")
+        return timestamp, image
+
     def merge(self, data):
         device = str(uuid.UUID(data["device"]))
         revision = data["revision"]
         if type(revision) is not int or not 0 <= revision < 2**53 - 1:
             raise ValueError("invalid revision")
+        selective = data.get("protocol") == 4
+        subscriptions = None
+        if selective:
+            ids = data["subscriptions"]
+            if not isinstance(ids, list) or not 1 <= len(ids) <= 1000:
+                raise ValueError("invalid subscriptions")
+            subscriptions = {str(uuid.UUID(uid)) for uid in ids}
+            if len(subscriptions) != len(ids) or any(uid not in subscriptions for uid in ids):
+                raise ValueError("invalid subscriptions")
         users, records = data["users"], data["records"]
-        if not isinstance(users, list) or not 1 <= len(users) <= 1000:
+        if not isinstance(users, list) or not (0 if selective else 1) <= len(users) <= 1000:
             raise ValueError("invalid users")
         clean_users, user_ids = [], set()
         for u in users:
             uid = str(uuid.UUID(u["id"]))
             if uid != u["id"] or uid in user_ids:
                 raise ValueError("invalid user id")
+            if selective and uid not in subscriptions:
+                raise ValueError("unsubscribed profile")
             user_ids.add(uid)
-            self.stamp(u)
+            if type(u["nameAt"]) is not int or not 0 <= u["nameAt"] < 2**53 - 1:
+                raise ValueError("invalid name timestamp")
             if not isinstance(u["name"], str) or not 1 <= len(u["name"].strip()) <= 24:
                 raise ValueError("invalid user name")
-            clean_users.append({k: u[k] for k in ("id", "name", "version", "actor")})
+            clean = {k: u[k] for k in ("id", "name", "nameAt")}
+            clean.update(avatar="", avatarAt=0)
+            if "avatar" in u or "avatarAt" in u:
+                avatar_at, avatar = self.avatar(u)
+                clean.update(avatar=avatar, avatarAt=avatar_at)
+            clean_users.append(clean)
         if not isinstance(records, list) or len(records) > 100000:
             raise ValueError("invalid records")
         rows, seen = [], set()
@@ -244,8 +282,8 @@ class Store:
         with self.lock:
             stored = self.export()
             if "users" not in stored:
-                stored["users"] = [{"id": uid, "name": name, "version": 1, "actor": USER_IDS[0]}
-                                   for uid, name in zip(USER_IDS, ("用户一",))]
+                stored["users"] = [{"id": uid, "name": name, "nameAt": 0}
+                                   for uid, name in zip(USER_IDS, ("用户一",))] if stored["devices"] else []
                 stored["legacyDevices"] = [d["id"] for d in stored["devices"]]
                 for e in stored["entries"]:
                     e.update(owner=USER_IDS[0], version=1, actor=e["device"], deleted=False)
@@ -265,13 +303,18 @@ class Store:
                     merged[e["id"]] = e
                 elif self.stamp(e) == self.stamp(old) and any(e[k] != old[k] for k in e):
                     raise ValueError("conflicting mutation identity")
-            profiles = {u["id"]: u for u in stored["users"]}
+            profiles = {u["id"]: {"id":u["id"],"name":u["name"],"nameAt":u.get("nameAt",0),
+                                   "avatar":u.get("avatar",""),"avatarAt":u.get("avatarAt",0)} for u in stored["users"]}
             for u in clean_users:
                 old = profiles.get(u["id"])
-                if old is None or self.stamp(u) > self.stamp(old):
-                    profiles[u["id"]] = u
-                elif self.stamp(u) == self.stamp(old) and u != old:
-                    raise ValueError("conflicting user mutation")
+                if old is None or (u["nameAt"], u["name"].encode("utf-16-be", "surrogatepass")) > (old["nameAt"], old["name"].encode("utf-16-be", "surrogatepass")):
+                    chosen = dict(u)
+                else:
+                    chosen = dict(old)
+                if "avatar" in u or (old is not None and "avatar" in old):
+                    avatar_at, avatar = max(self.avatar(u), self.avatar(old or {}))
+                    chosen.update(avatar=avatar, avatarAt=avatar_at)
+                profiles[u["id"]] = chosen
             stored["entries"] = sorted(merged.values(), key=lambda e: (e["at"], e["id"]), reverse=True)
             stored["users"] = [profiles[uid] for uid in sorted(profiles)]
             if len(profiles) > 1000:
@@ -279,6 +322,13 @@ class Store:
             stored["devices"] = [d for d in stored["devices"] if d["id"] != device] + [
                 {"id": device, "revision": revision, "updated": dt.datetime.now(dt.timezone.utc).isoformat()}]
             result = {"protocol": 2, "revision": revision, "users": stored["users"], "records": stored["entries"]}
+            if selective:
+                result.update(protocol=4,
+                    users=[u for u in stored["users"] if u["id"] in subscriptions],
+                    records=[e for e in stored["entries"] if e["owner"] in subscriptions],
+                    missingUsers=sorted(subscriptions - profiles.keys()),
+                    outOfScope=[{k: e[k] for k in ("id", "version", "actor")}
+                                for e in stored["entries"] if e["id"] in seen and e["owner"] not in subscriptions])
             if len(json.dumps(result, ensure_ascii=False).encode()) > MAX_BODY:
                 raise ValueError("ledger size limit")
             self._write(stored)

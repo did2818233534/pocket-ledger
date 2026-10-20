@@ -9,10 +9,12 @@ import org.json.*;
 
 public class MainActivity extends Activity {
     private WebView web;
+    private String avatarUser;
     private boolean handlingBack;
     private android.window.OnBackInvokedCallback backCallback;
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        avatarUser=state==null?null:state.getString("avatarUser");
         Tailnet.init(this);
         web = new WebView(this);
         if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0)
@@ -130,6 +132,25 @@ public class MainActivity extends Activity {
         @JavascriptInterface public String addUser(String name) {
             try { LedgerDb.get(MainActivity.this).addUser(name); autoSync(); return ""; } catch(Exception e) { return "添加失败，请输入 1–24 个字的名字"; }
         }
+        @JavascriptInterface public void chooseAvatar(String id) {
+            runOnUiThread(()->{
+                avatarUser=id;
+                Intent pick=new Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
+                try{startActivityForResult(pick,11);}catch(Exception e){android.widget.Toast.makeText(MainActivity.this,"无法打开图片选择器",0).show();}
+            });
+        }
+        @JavascriptInterface public String clearAvatar(String id) {
+            try{LedgerDb.get(MainActivity.this).setAvatar(id,"");autoSync();return "";}catch(Exception e){return "请先等待用户资料同步";}
+        }
+        @JavascriptInterface public String joinUser(String id) {
+            try { LedgerDb.get(MainActivity.this).joinUser(id); autoSync(); return ""; } catch(Exception e) { return "请检查用户 ID 是否完整、正确"; }
+        }
+        @JavascriptInterface public String leaveUser(String id) {
+            try { LedgerDb.get(MainActivity.this).leaveUser(id,getSharedPreferences("sync",0).getLong("syncedRevision",-1)); autoSync(); return ""; } catch(Exception e) { return e.getMessage(); }
+        }
+        @JavascriptInterface public void copyUserId(String id) {
+            try { java.util.UUID.fromString(id); runOnUiThread(()->((android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(android.content.ClipData.newPlainText("小账用户 ID",id))); } catch(Exception ignored) {}
+        }
         @JavascriptInterface public String renameUser(String id,String name) {
             try { LedgerDb.get(MainActivity.this).renameUser(id,name); autoSync(); return ""; } catch(Exception e) { return "名字需为 1–24 个字"; }
         }
@@ -195,6 +216,19 @@ public class MainActivity extends Activity {
     }
     protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
+        if(request==11){
+            String id=avatarUser;avatarUser=null;
+            if(result==RESULT_OK&&data!=null&&data.getData()!=null&&id!=null){
+                android.net.Uri uri=data.getData();
+                new Thread(()->{
+                    try{
+                        String image=AvatarCodec.read(this,uri);LedgerDb.get(this).setAvatar(id,image);SyncService.requestQuietly(this);
+                        runOnUiThread(()->{if(!isDestroyed()){web.evaluateJavascript("refreshProfileView()",null);android.widget.Toast.makeText(this,"头像已更新，等待同步",0).show();}});
+                    }catch(Exception e){runOnUiThread(()->android.widget.Toast.makeText(this,"图片读取失败，请换一张图片",0).show());}
+                },"ledger-avatar").start();
+            }
+            return;
+        }
         if (request==10 && result==RESULT_OK && data!=null) {
             try (java.io.OutputStream out = getContentResolver().openOutputStream(data.getData())) {
                 out.write(LedgerDb.get(this).snapshot().toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -202,6 +236,7 @@ public class MainActivity extends Activity {
             } catch(Exception e) { android.widget.Toast.makeText(this,"导出失败",0).show(); }
         }
     }
+    protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("avatarUser",avatarUser);}
     public void onDestroy() {
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null)
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
