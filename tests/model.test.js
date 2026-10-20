@@ -39,3 +39,9 @@ test('giving is included in every period and daily totals alongside older entrie
     assert.equal(s.count,2);
   }
 });
+test('calculator respects precedence, nested brackets and exact final rounding',()=>{
+ for(const [expression,expected] of [['480*2',96000],['(480+20)*2',100000],['2*(3+(4/2))',1000],['（10+2）÷3',400],['0.1+0.2',30],['1/3*3',100],['1.005',101],['.5+2.',250],['10--2',1200],['999999999.99',99999999999]])assert.equal(M.calculateAmount(expression),expected,expression);
+});
+test('calculator rejects malformed, unsafe, zero, negative and overflowing amounts',()=>{
+ for(const expression of ['', '1+', '(2+3', '2(3)', '1/0', '1/(2-2)', '-2', '0.001', '1000000000', '1e3', 'alert(1)', '2**3', '1 2', '1'.repeat(121)])assert.throws(()=>M.calculateAmount(expression),expression);
+});
