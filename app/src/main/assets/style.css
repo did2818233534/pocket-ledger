@@ -49,3 +49,5 @@ html,body,#app,.entry-filters,.filter-choice,.filter-options{overflow-anchor:non
 button,a,summary,label,input,select,[role=button],[role=option]{-webkit-tap-highlight-color:transparent}summary:focus:not(:focus-visible),a:focus:not(:focus-visible){outline:none}summary:focus-visible,a:focus-visible{outline:2px solid #8eb9a2;outline-offset:3px;border-radius:6px}
 
 #users-settings>.user-field{margin-bottom:0}.sync-fold{margin-top:18px;border-top:1px solid var(--line);padding-top:16px}.sync-fold>summary{font-size:14px;font-weight:550;color:var(--ink);padding:4px 0}.connection-remote{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}
+
+.legend-name .claim-qualifier{font-size:11px;font-weight:400;color:var(--muted);white-space:nowrap}
