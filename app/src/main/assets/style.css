@@ -50,4 +50,4 @@ button,a,summary,label,input,select,[role=button],[role=option]{-webkit-tap-high
 
 #users-settings>.user-field{margin-bottom:0}.sync-fold{margin-top:18px;border-top:1px solid var(--line);padding-top:16px}.sync-fold>summary{font-size:14px;font-weight:550;color:var(--ink);padding:4px 0}.connection-remote{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}
 
-.legend-name .claim-qualifier{font-size:11px;font-weight:400;color:var(--muted);white-space:nowrap}
+.legend-name .claim-qualifier{font-size:9px;font-weight:400;color:var(--muted);white-space:nowrap}
