@@ -45,3 +45,5 @@
 html,body,#app,.entry-filters,.filter-choice,.filter-options{overflow-anchor:none}.filter-choice-done{margin:8px 0 0;padding:11px;font-size:12px}.filter-choice .field-label{display:flex;justify-content:space-between;align-items:center}.filter-choice .user-trigger:active,.filter-choice .user-option:active,.filter-toggle:active,#month-trigger:active,.user-trigger:active,#category-trigger:active,#computer-trigger:active{transform:none}
 
 .entry-filters .filter-date-input input:focus{outline:none}.filter-date-input:focus-within{border-color:#8eb9a2;box-shadow:0 0 0 2px #257d610d}.filter-date-input input,.filter-date-input button{-webkit-tap-highlight-color:transparent}
+
+button,a,summary,label,input,select,[role=button],[role=option]{-webkit-tap-highlight-color:transparent}summary:focus:not(:focus-visible),a:focus:not(:focus-visible){outline:none}summary:focus-visible,a:focus-visible{outline:2px solid #8eb9a2;outline-offset:3px;border-radius:6px}

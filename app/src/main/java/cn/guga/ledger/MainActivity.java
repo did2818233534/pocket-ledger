@@ -197,13 +197,13 @@ public class MainActivity extends Activity {
             try{LedgerDb.get(MainActivity.this).setAvatar(id,"");autoSync();return "";}catch(Exception e){return "请先等待用户资料同步";}
         }
         @JavascriptInterface public String joinUser(String id) {
-            try { LedgerDb.get(MainActivity.this).joinUser(id); autoSync(); return ""; } catch(Exception e) { return "请检查用户 ID 是否完整、正确"; }
+            try { LedgerDb.get(MainActivity.this).joinUser(id); autoSync(); return ""; } catch(Exception e) { return "请输入正确的用户编号，例如 1"; }
         }
         @JavascriptInterface public String leaveUser(String id) {
             try { LedgerDb.get(MainActivity.this).leaveUser(id,getSharedPreferences("sync",0).getLong("syncedRevision",-1)); autoSync(); return ""; } catch(Exception e) { return e.getMessage(); }
         }
         @JavascriptInterface public void copyUserId(String id) {
-            try { java.util.UUID.fromString(id); runOnUiThread(()->((android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(android.content.ClipData.newPlainText("小账用户 ID",id))); } catch(Exception ignored) {}
+            try { LedgerDb.validateUserId(id); runOnUiThread(()->((android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(android.content.ClipData.newPlainText("小账用户 ID",id))); } catch(Exception ignored) {}
         }
         @JavascriptInterface public String renameUser(String id,String name) {
             try { LedgerDb.get(MainActivity.this).renameUser(id,name); autoSync(); return ""; } catch(Exception e) { return "名字需为 1–24 个字"; }

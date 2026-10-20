@@ -14,12 +14,12 @@ public final class LedgerDb extends SQLiteOpenHelper {
         if (instance == null) instance = new LedgerDb(c.getApplicationContext());
         return instance;
     }
-    private LedgerDb(Context c) { super(c, "ledger.db", null, 7); }
+    private LedgerDb(Context c) { super(c, "ledger.db", null, 8); }
     public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE entries(id TEXT PRIMARY KEY, amount INTEGER NOT NULL, at TEXT NOT NULL, category TEXT NOT NULL, note TEXT NOT NULL)");
         db.execSQL("CREATE TABLE meta(device TEXT NOT NULL, revision INTEGER NOT NULL)");
         db.execSQL("INSERT INTO meta VALUES(?,0)", new Object[]{UUID.randomUUID().toString()});
-        onUpgrade(db,1,7);
+        onUpgrade(db,1,8);
         String initial=UUID.randomUUID().toString();
         db.execSQL("UPDATE users SET id=?",new Object[]{initial});
         db.execSQL("UPDATE meta SET currentUser=?",new Object[]{initial});
@@ -49,6 +49,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
         if(a<5)db.execSQL("ALTER TABLE entries ADD COLUMN primaryNote TEXT NOT NULL DEFAULT ''");
         if(a<6)db.execSQL("UPDATE entries SET at=substr(at,1,10)");
         if(a<7)db.execSQL("ALTER TABLE entries ADD COLUMN reimbursed INTEGER NOT NULL DEFAULT 0");
+        if(a<8)db.execSQL("CREATE TABLE user_aliases(oldId TEXT PRIMARY KEY,id TEXT NOT NULL)");
     }
     public synchronized JSONObject snapshot() throws JSONException {
         JSONObject result=syncSnapshot(); JSONArray visible=new JSONArray(),rows=result.getJSONArray("records");
@@ -58,7 +59,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
         return result.put("entries",visible).put("users",profiles(true));
     }
     public synchronized JSONObject syncSnapshot() throws JSONException {
-        JSONObject result = new JSONObject().put("protocol",4);
+        JSONObject result = new JSONObject().put("protocol",5);
         SQLiteDatabase db = getReadableDatabase();
         try (Cursor c = db.rawQuery("SELECT device,revision FROM meta", null)) {
             c.moveToFirst(); result.put("device", c.getString(0)); result.put("revision", c.getLong(1));
@@ -83,11 +84,34 @@ public final class LedgerDb extends SQLiteOpenHelper {
         }
         return users;
     }
+    public static void validateUserId(String id){if(!id.matches("[1-9][0-9]{0,8}"))UUID.fromString(id);}
+    private String canonicalUser(String id){try(Cursor c=getReadableDatabase().rawQuery("SELECT id FROM user_aliases WHERE oldId=?",new String[]{id})){return c.moveToFirst()?c.getString(0):id;}}
+    private void remapUsers(SQLiteDatabase db,JSONObject mapping)throws Exception{
+        if(mapping==null)return;
+        java.util.Iterator<String> ids=mapping.keys();
+        while(ids.hasNext()){
+            String oldId=ids.next(),id=mapping.getString(oldId);validateUserId(oldId);
+            if(!id.matches("[1-9][0-9]{0,8}"))throw new IllegalArgumentException("无效用户编号");
+            if(oldId.equals(id)||!subscribed(oldId))continue;
+            JSONObject old=null;JSONArray all=profiles(true);for(int i=0;i<all.length();i++)if(all.getJSONObject(i).getString("id").equals(oldId))old=all.getJSONObject(i);
+            if(!subscribed(id)){db.execSQL("UPDATE users SET id=? WHERE id=?",new Object[]{id,oldId});}
+            else{
+                try(Cursor c=db.rawQuery("SELECT nameAt,name,pending FROM users WHERE id=?",new String[]{id})){
+                    c.moveToFirst();if(old!=null&&(c.getInt(2)!=0||old.getLong("nameAt")>c.getLong(0)||(old.getLong("nameAt")==c.getLong(0)&&old.getString("name").compareTo(c.getString(1))>0))){db.execSQL("UPDATE users SET name=?,nameAt=?,pending=? WHERE id=?",new Object[]{old.getString("name"),old.getLong("nameAt"),old.optBoolean("pending")?1:0,id});}
+                }
+                if(old!=null)mergeAvatar(db,new JSONObject(old.toString()).put("id",id));
+                db.delete("users","id=?",new String[]{oldId});
+            }
+            db.execSQL("UPDATE entries SET owner=? WHERE owner=?",new Object[]{id,oldId});
+            db.execSQL("UPDATE meta SET currentUser=? WHERE currentUser=?",new Object[]{id,oldId});
+            db.execSQL("INSERT OR REPLACE INTO user_aliases VALUES(?,?)",new Object[]{oldId,id});
+        }
+    }
     private boolean subscribed(String id){
         try(Cursor c=getReadableDatabase().rawQuery("SELECT id FROM users WHERE id=?",new String[]{id})){return c.moveToFirst();}
     }
     private void validUser(String id){
-        UUID.fromString(id);
+        validateUserId(id);
         try(Cursor c=getReadableDatabase().rawQuery("SELECT id FROM users WHERE id=? AND pending=0",new String[]{id})){
             if(!c.moveToFirst())throw new IllegalArgumentException("请选择记账用户");
         }
@@ -100,7 +124,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
         if(amount<1||amount>99999999999L||!e.getString("category").matches("daily|extra|claim|giving")||e.getString("note").length()>200||e.optString("primaryNote").length()>60)throw new IllegalArgumentException("无效账单");
     }
     private ContentValues entryValues(JSONObject e) throws Exception {
-        validEntry(e); ContentValues v=new ContentValues();
+        e.put("owner",canonicalUser(e.getString("owner")));validEntry(e); ContentValues v=new ContentValues();
         for(String key:new String[]{"id","at","category","note","owner","actor"})v.put(key,e.getString(key));
         v.put("reimbursed",e.getString("category").equals("claim")&&e.optBoolean("reimbursed",false)?1:0);
         v.put("at",e.getString("at").substring(0,10));v.put("primaryNote",e.optString("primaryNote",""));v.put("amount",e.getLong("amount"));v.put("version",e.getLong("version"));v.put("deleted",e.getBoolean("deleted")?1:0);return v;
@@ -136,7 +160,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
             db.setTransactionSuccessful();
         }finally{db.endTransaction();}
     }
-    public synchronized void selectUser(String id){validUser(id);getWritableDatabase().execSQL("UPDATE meta SET currentUser=?",new Object[]{id});}
+    public synchronized void selectUser(String id){id=canonicalUser(id);validUser(id);getWritableDatabase().execSQL("UPDATE meta SET currentUser=?",new Object[]{id});}
     public synchronized void addUser(String name){
         name=name.trim();if(name.isEmpty()||name.length()>24)throw new IllegalArgumentException("名字需为 1–24 个字");
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
@@ -147,7 +171,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
         }finally{db.endTransaction();}
     }
     public synchronized void joinUser(String raw){
-        String id=UUID.fromString(raw.trim()).toString();if(!id.equalsIgnoreCase(raw.trim()))throw new IllegalArgumentException("请输入完整用户 ID");
+        String id=raw.trim();validateUserId(id);id=canonicalUser(id);
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
         try{
             try(Cursor c=db.rawQuery("SELECT COUNT(*) FROM users",null)){c.moveToFirst();if(c.getInt(0)>=1000)throw new IllegalArgumentException("用户数量已达上限");}
@@ -159,7 +183,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
         }finally{db.endTransaction();}
     }
     public synchronized void leaveUser(String id,long syncedRevision){
-        if(!subscribed(id))return;
+        id=canonicalUser(id);if(!subscribed(id))return;
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
         try{
             try(Cursor c=db.rawQuery("SELECT COUNT(*) FROM users",null)){c.moveToFirst();if(c.getInt(0)<=1)throw new IllegalArgumentException("请先添加其他用户，再移除这个用户");}
@@ -170,14 +194,14 @@ public final class LedgerDb extends SQLiteOpenHelper {
         }finally{db.endTransaction();}
     }
     public synchronized void renameUser(String id,String name){
-        validUser(id);name=name.trim();if(name.isEmpty()||name.length()>24)throw new IllegalArgumentException("名字需为 1–24 个字");
+        id=canonicalUser(id);validUser(id);name=name.trim();if(name.isEmpty()||name.length()>24)throw new IllegalArgumentException("名字需为 1–24 个字");
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
         try{
             long previous;try(Cursor c=db.rawQuery("SELECT nameAt FROM users WHERE id=?",new String[]{id})){c.moveToFirst();previous=c.getLong(0);}
             ContentValues v=new ContentValues();v.put("name",name);v.put("nameAt",Math.max(System.currentTimeMillis(),previous+1));db.update("users",v,"id=?",new String[]{id});db.execSQL("UPDATE meta SET revision=revision+1");db.setTransactionSuccessful();}finally{db.endTransaction();}
     }
     public synchronized void setAvatar(String id,String avatar){
-        validUser(id);if(avatar.length()>90000)throw new IllegalArgumentException("头像太大");
+        id=canonicalUser(id);validUser(id);if(avatar.length()>90000)throw new IllegalArgumentException("头像太大");
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
         try{
             long previous;try(Cursor c=db.rawQuery("SELECT avatarAt FROM users WHERE id=?",new String[]{id})){c.moveToFirst();previous=c.getLong(0);}
@@ -207,13 +231,14 @@ public final class LedgerDb extends SQLiteOpenHelper {
         }
     }
     public synchronized void merge(JSONObject reply) throws Exception {
-        if(reply.getInt("protocol")!=4)throw new IllegalArgumentException("请升级电脑同步服务");
+        if(reply.getInt("protocol")!=5)throw new IllegalArgumentException("请升级电脑同步服务");
         JSONArray users=reply.getJSONArray("users"),records=reply.getJSONArray("records");
         if(users.length()>1000)throw new IllegalArgumentException("无效用户数据");
         java.util.HashSet<String> seen=new java.util.HashSet<>();SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
         try{
+            remapUsers(db,reply.optJSONObject("idMap"));
             for(int i=0;i<users.length();i++){
-                JSONObject u=users.getJSONObject(i);String id=u.getString("id"),name=u.getString("name");UUID.fromString(id);
+                JSONObject u=users.getJSONObject(i);String id=u.getString("id"),name=u.getString("name");validateUserId(id);
                 if(!seen.add(id)||name.trim().isEmpty()||name.length()>24)throw new IllegalArgumentException("无效用户数据");
                 if(subscribed(id)){
                     long at=u.getLong("nameAt");if(at<0||at>=9007199254740991L)throw new IllegalArgumentException("无效名字时间");

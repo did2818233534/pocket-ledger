@@ -59,13 +59,13 @@ public final class LedgerDbTest {
             JSONArray currentProfiles=db.snapshot().getJSONArray("users");for(int i=0;i<currentProfiles.length();i++)if(currentProfiles.getJSONObject(i).getString("id").equals(owner))avatarAt=currentProfiles.getJSONObject(i).getLong("avatarAt");
             db.merge(remote);JSONObject avatarProfile=null;currentProfiles=db.snapshot().getJSONArray("users");for(int i=0;i<currentProfiles.length();i++)if(currentProfiles.getJSONObject(i).getString("id").equals(owner))avatarProfile=currentProfiles.getJSONObject(i);
             check(avatarProfile.getString("avatar").equals(avatar)&&avatarProfile.getLong("avatarAt")==avatarAt,"old name/profile response must not revert avatar");
-            db.setAvatar(owner,"");db.merge(new JSONObject().put("protocol",4).put("users",new JSONArray().put(avatarProfile)).put("records",new JSONArray()));
+            db.setAvatar(owner,"");db.merge(new JSONObject().put("protocol",5).put("users",new JSONArray().put(avatarProfile)).put("records",new JSONArray()));
             currentProfiles=db.snapshot().getJSONArray("users");for(int i=0;i<currentProfiles.length();i++)if(currentProfiles.getJSONObject(i).getString("id").equals(owner))check(currentProfiles.getJSONObject(i).getString("avatar").isEmpty(),"old avatar must not reappear after removal");
             boolean blocked=false;try{db.leaveUser(fourth,-1);}catch(IllegalArgumentException expected){blocked=true;}check(blocked,"unsynced changes protected before leaving");
             db.leaveUser(fourth,db.snapshot().getLong("revision"));db.merge(remote);
             check(db.snapshot().getJSONArray("users").length()==3,"late reply must not re-add removed user");
             check(db.snapshot().getJSONArray("entries").length()==0,"late reply must not re-add removed user's entries");
-            JSONObject moved=new JSONObject().put("protocol",4).put("users",new JSONArray()).put("records",new JSONArray()).put("outOfScope",new JSONArray().put(new JSONObject().put("id",row.getString("id")).put("version",remoteVersion+100).put("actor",fourth)));
+            JSONObject moved=new JSONObject().put("protocol",5).put("users",new JSONArray()).put("records",new JSONArray()).put("outOfScope",new JSONArray().put(new JSONObject().put("id",row.getString("id")).put("version",remoteVersion+100).put("actor",fourth)));
             db.merge(moved);check(db.syncSnapshot().getJSONArray("records").length()==0,"ownership change out of scope removes cached row");
             JSONObject claim=entry(owner).put("category","claim");String claimId=claim.getString("id");db.save(claim.toString());
             check(!db.snapshot().getJSONArray("entries").getJSONObject(0).getBoolean("reimbursed"),"new claim starts pending");
@@ -83,6 +83,11 @@ public final class LedgerDbTest {
             check(migrated.getString("id").equals(id)&&migrated.getLong("amount")==123&&migrated.getString("owner").equals(LedgerDb.USER_ONE),"legacy entry preserved with initial owner");
             check(migrated.getString("at").length()==10,"legacy dates lose hours and minutes");
             check(state.getLong("revision")==7&&state.getString("device").equals(device),"migration preserves revision and device");
+            String oldOwner=migrated.getString("owner");JSONObject mapped=new JSONObject().put("protocol",5).put("idMap",new JSONObject().put(oldOwner,"1")).put("users",new JSONArray()).put("records",new JSONArray());
+            db.merge(mapped);JSONObject numbered=db.snapshot();check(numbered.getString("currentUser").equals("1"),"current user remapped to 1");check(numbered.getJSONArray("entries").getJSONObject(0).getString("owner").equals("1"),"record owner remapped without deletion");
+            db.save(entry(oldOwner).toString());check(db.snapshot().getJSONArray("entries").length()==2,"stale editor owner resolves through alias");
+            db.joinUser("2");check(db.snapshot().getJSONArray("users").length()==2,"numeric join supported");
+            db.merge(mapped);check(db.snapshot().getJSONArray("users").length()==2,"ID remapping is idempotent");
             System.out.println("PASS: isolated Android database migration, 4 users, cross-user editing, stale replies, clock, deletion, rename and atomic rejection");
         }finally{if(db!=null)db.close();clean();}
         System.exit(0);

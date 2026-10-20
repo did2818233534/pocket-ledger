@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Shared offline ledger sync server with durable monthly JSON storage."""
 import argparse
+import copy
 import base64
 import binascii
 import datetime as dt
@@ -157,6 +158,8 @@ class Store:
             "index": {"format": 2, "devices": data["devices"], "months": sorted(months)}}
         if "users" in data:
             transaction["index"].update(users=data["users"], legacyDevices=data.get("legacyDevices", []))
+        if "idAliases" in data:
+            transaction["index"]["idAliases"] = data["idAliases"]
         # Durably record the complete operation before touching any monthly file.
         self._atomic_write(self.pending, transaction)
         self._recover()
@@ -203,13 +206,20 @@ class Store:
             result = {"format": 1, "devices": index["devices"], "entries": entries}
             if "users" in index:
                 result.update(users=index["users"], legacyDevices=index.get("legacyDevices", []), protocol=4)
+            if "idAliases" in index:
+                result["idAliases"] = index["idAliases"]
             return result
 
     def accept(self, data):
         if not isinstance(data, dict):
             raise ValueError("invalid sync object")
+        if data.get("protocol") == 5:
+            return self.merge_numbered(data)
         if data.get("protocol") == 4:
-            return self.merge(data)
+            with self.lock:
+                if "idAliases" in self.export():
+                    raise ValueError("Upgrade client for numbered user IDs")
+                return self.merge(data)
         with self.lock:
             if "users" in self.export():
                 raise ValueError("Upgrade client to shared ledger version")
@@ -239,7 +249,55 @@ class Store:
                 raise ValueError("invalid avatar image")
         return timestamp, image
 
-    def merge(self, data):
+    @staticmethod
+    def user_id(value):
+        if isinstance(value, str) and re.fullmatch(r"[1-9][0-9]{0,8}", value):
+            return value
+        result = str(uuid.UUID(value))
+        if result != value:
+            raise ValueError("invalid user id")
+        return result
+
+    def merge_numbered(self, incoming):
+        with self.lock:
+            stored = self.export()
+            data = copy.deepcopy(incoming)
+            if not isinstance(data.get("users"), list) or not isinstance(data.get("subscriptions"), list):
+                raise ValueError("invalid profiles")
+            aliases = dict(stored.get("idAliases", {}))
+            used = {u["id"] for u in stored.get("users", []) if u["id"].isdigit()} | set(aliases.values())
+            next_id = max([int(v) for v in used] + [0]) + 1
+            def canonical(uid, allocate=False):
+                nonlocal next_id
+                self.user_id(uid)
+                if uid in aliases:
+                    return aliases[uid]
+                if uid.isdigit():
+                    return uid
+                if allocate:
+                    aliases[uid] = str(next_id)
+                    next_id += 1
+                    return aliases[uid]
+                return uid
+            for user in stored.get("users", []):
+                user["id"] = canonical(user["id"], True)
+            for entry in stored["entries"]:
+                entry["owner"] = canonical(entry.get("owner", USER_IDS[0]), True)
+            for user in data["users"]:
+                user["id"] = canonical(user["id"], True)
+            old_subscriptions = data["subscriptions"]
+            if len(set(old_subscriptions)) != len(old_subscriptions):
+                raise ValueError("duplicate subscriptions")
+            data["subscriptions"] = list(dict.fromkeys(canonical(uid) for uid in old_subscriptions))
+            for entry in data["records"]:
+                entry["owner"] = canonical(entry["owner"])
+            data["protocol"] = 4
+            stored["idAliases"] = aliases
+            mappings = {uid: aliases[uid] for uid in old_subscriptions if uid in aliases}
+            return self.merge(data, stored, mappings)
+
+    def merge(self, data, stored_override=None, id_map=None):
+
         device = str(uuid.UUID(data["device"]))
         revision = data["revision"]
         if type(revision) is not int or not 0 <= revision < 2**53 - 1:
@@ -250,7 +308,7 @@ class Store:
             ids = data["subscriptions"]
             if not isinstance(ids, list) or not 1 <= len(ids) <= 1000:
                 raise ValueError("invalid subscriptions")
-            subscriptions = {str(uuid.UUID(uid)) for uid in ids}
+            subscriptions = {self.user_id(uid) for uid in ids}
             if len(subscriptions) != len(ids) or any(uid not in subscriptions for uid in ids):
                 raise ValueError("invalid subscriptions")
         users, records = data["users"], data["records"]
@@ -258,7 +316,7 @@ class Store:
             raise ValueError("invalid users")
         clean_users, user_ids = [], set()
         for u in users:
-            uid = str(uuid.UUID(u["id"]))
+            uid = self.user_id(u["id"])
             if uid != u["id"] or uid in user_ids:
                 raise ValueError("invalid user id")
             if selective and uid not in subscriptions:
@@ -301,7 +359,7 @@ class Store:
                 row["primaryNote"] = e["primaryNote"]
             rows.append(row)
         with self.lock:
-            stored = self.export()
+            stored = stored_override if stored_override is not None else self.export()
             if "users" not in stored:
                 stored["users"] = [{"id": uid, "name": name, "nameAt": 0}
                                    for uid, name in zip(USER_IDS, ("用户一",))] if stored["devices"] else []
@@ -352,6 +410,8 @@ class Store:
                     missingUsers=sorted(subscriptions - profiles.keys()),
                     outOfScope=[{k: e[k] for k in ("id", "version", "actor")}
                                 for e in stored["entries"] if e["id"] in seen and e["owner"] not in subscriptions])
+            if id_map is not None:
+                result.update(protocol=5, idMap=id_map)
             if len(json.dumps(result, ensure_ascii=False).encode()) > MAX_BODY:
                 raise ValueError("ledger size limit")
             self._write(stored)
