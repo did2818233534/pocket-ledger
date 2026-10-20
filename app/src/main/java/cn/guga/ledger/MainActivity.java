@@ -8,6 +8,27 @@ import android.view.*;
 import org.json.*;
 
 public class MainActivity extends Activity {
+    /** One rounded surface for all app-owned native dialogs. */
+    private static final class LedgerDialogBuilder extends AlertDialog.Builder {
+        LedgerDialogBuilder(Context context){super(context);}
+        @Override public AlertDialog show(){
+            AlertDialog dialog=super.show();
+            android.view.Window window=dialog.getWindow();
+            if(window!=null){
+                float density=getContext().getResources().getDisplayMetrics().density;
+                android.graphics.drawable.GradientDrawable surface=new android.graphics.drawable.GradientDrawable();
+                surface.setColor(0xfffcfdf9);surface.setCornerRadius(24*density);
+                window.setBackgroundDrawable(surface);
+                window.getDecorView().setClipToOutline(true);
+                int width=Math.min((int)(520*density),getContext().getResources().getDisplayMetrics().widthPixels-(int)(48*density));
+                window.setLayout(width,android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+            }
+            for(int which:new int[]{AlertDialog.BUTTON_POSITIVE,AlertDialog.BUTTON_NEGATIVE,AlertDialog.BUTTON_NEUTRAL}){
+                android.widget.Button button=dialog.getButton(which);if(button!=null)button.setTextColor(0xff257d61);
+            }
+            return dialog;
+        }
+    }
     private WebView web;
     private String avatarUser;
     private boolean handlingBack;
@@ -49,7 +70,7 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new Bridge(), "Native");
         web.setWebChromeClient(new WebChromeClient() {
             public boolean onJsConfirm(WebView view,String url,String message,JsResult result) {
-                new AlertDialog.Builder(MainActivity.this).setMessage(message)
+                new LedgerDialogBuilder(MainActivity.this).setMessage(message)
                     .setPositiveButton(message.startsWith("确定删除") ? "删除" : message.startsWith("退出 Tailscale") ? "退出账号" : "放弃修改",(d,w)->result.confirm())
                     .setNegativeButton("取消",(d,w)->result.cancel())
                     .setOnCancelListener(d->result.cancel()).show();
@@ -101,7 +122,7 @@ public class MainActivity extends Activity {
         web.evaluateJavascript("typeof window.handleAppBack === 'function' ? window.handleAppBack() : 'loading'", value -> {
             if (isFinishing() || isDestroyed()) { handlingBack=false; return; }
             if (!"\"root\"".equals(value)) { handlingBack=false; return; }
-            new AlertDialog.Builder(this).setTitle("退出小账？")
+            new LedgerDialogBuilder(this).setTitle("退出小账？")
                 .setMessage("账目已保存在手机。退出后停止同步和远程连接，下次打开立即同步。")
                 .setNegativeButton("留在小账",(d,w)->{})
                 .setPositiveButton("退出小账",(d,w)->finishAndRemoveTask())
@@ -127,7 +148,7 @@ public class MainActivity extends Activity {
                 }
                 android.widget.NumberPicker.OnValueChangeListener changed=(picker,oldValue,newValue)->{int maximum=java.time.YearMonth.of(year.getValue(),month.getValue()).lengthOfMonth();day.setValue(Math.min(day.getValue(),maximum));day.setMaxValue(maximum);};
                 year.setOnValueChangedListener(changed);month.setOnValueChangedListener(changed);
-                new AlertDialog.Builder(MainActivity.this).setTitle("选择日期").setView(row)
+                new LedgerDialogBuilder(MainActivity.this).setTitle("选择日期").setView(row)
                     .setNegativeButton("取消",null).setPositiveButton("确定",(dialog,which)->{
                         String value=java.time.LocalDate.of(year.getValue(),month.getValue(),day.getValue()).toString();
                         web.evaluateJavascript("window.setExpenseDate("+JSONObject.quote(value)+")",null);
@@ -217,7 +238,7 @@ public class MainActivity extends Activity {
                     android.widget.TextView text=new android.widget.TextView(MainActivity.this);
                     text.setText(out.toString("UTF-8"));text.setTextSize(12);text.setPadding(24,16,24,16);text.setTextIsSelectable(true);
                     android.widget.ScrollView scroll=new android.widget.ScrollView(MainActivity.this);scroll.addView(text);
-                    new AlertDialog.Builder(MainActivity.this).setTitle("开源许可").setView(scroll).setPositiveButton("关闭",null).show();
+                    new LedgerDialogBuilder(MainActivity.this).setTitle("开源许可").setView(scroll).setPositiveButton("关闭",null).show();
                 } catch(Exception ignored) {}
             });
         }
