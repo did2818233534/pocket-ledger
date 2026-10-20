@@ -10,7 +10,7 @@
 /* User selection is inline; viewing can include several people, each entry has one owner. */
 .user-field{margin:0 0 22px}.user-caption{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;font-size:13px;color:#465b51}.user-caption>span{font-size:11px;color:#87928b}
 .user-trigger{width:100%;display:flex;align-items:center;gap:10px;background:white;border:1px solid #dfe6df;border-radius:14px;padding:14px 16px;text-align:left;color:#263f35;font-size:15px}
-.user-trigger-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.user-trigger-icon{width:28px;height:28px;border-radius:50%;background:#e7f1eb;color:#247b63;display:grid;place-items:center;font-size:12px}
+.user-trigger-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.user-avatar-stack{display:flex;align-items:center;flex-shrink:0;isolation:isolate}.user-avatar-stack .user-avatar{width:34px;height:34px;border:2px solid #fff;position:relative}.user-avatar-stack .user-avatar+.user-avatar{margin-left:-10px}
 .user-trigger[aria-expanded="true"]{border-radius:14px 14px 0 0;border-color:#aac4b5}.user-trigger[aria-expanded="true"] .chevron{transform:rotate(180deg)}
 .user-menu{background:#fff;border:1px solid #aac4b5;border-top:0;border-radius:0 0 14px 14px;padding:8px;box-shadow:0 8px 18px #2446370b}.user-menu[hidden]{display:none}
 .user-menu-heading{display:flex;justify-content:space-between;align-items:center;padding:2px 8px 8px;font-size:12px;color:#839087}.user-menu-heading button{padding:6px 8px;font-size:12px}
