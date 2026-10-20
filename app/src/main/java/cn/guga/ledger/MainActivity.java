@@ -101,6 +101,31 @@ public class MainActivity extends Activity {
         });
     }
     class Bridge {
+        @JavascriptInterface public void chooseDate(String raw) {
+            runOnUiThread(()->{
+                if(isFinishing()||isDestroyed())return;
+                java.time.LocalDate initial;
+                try{initial=java.time.LocalDate.parse(raw);}catch(Exception e){initial=java.time.LocalDate.now();}
+                android.widget.LinearLayout row=new android.widget.LinearLayout(MainActivity.this);
+                row.setPadding(24,16,24,8);
+                android.widget.NumberPicker year=new android.widget.NumberPicker(MainActivity.this),month=new android.widget.NumberPicker(MainActivity.this),day=new android.widget.NumberPicker(MainActivity.this);
+                year.setMinValue(1900);year.setMaxValue(9999);year.setValue(initial.getYear());
+                month.setMinValue(1);month.setMaxValue(12);month.setValue(initial.getMonthValue());
+                day.setMinValue(1);day.setMaxValue(initial.lengthOfMonth());day.setValue(initial.getDayOfMonth());
+                android.widget.NumberPicker[] wheels={year,month,day};String[] labels={"年","月","日"};
+                for(int i=0;i<wheels.length;i++){
+                    android.widget.NumberPicker wheel=wheels[i];final String unit=labels[i];wheel.setFormatter(v->v+unit);wheel.setContentDescription(unit);wheel.setWrapSelectorWheel(false);wheel.setDescendantFocusability(android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+                    row.addView(wheel,new android.widget.LinearLayout.LayoutParams(0,-2,1));
+                }
+                android.widget.NumberPicker.OnValueChangeListener changed=(picker,oldValue,newValue)->{int maximum=java.time.YearMonth.of(year.getValue(),month.getValue()).lengthOfMonth();day.setValue(Math.min(day.getValue(),maximum));day.setMaxValue(maximum);};
+                year.setOnValueChangedListener(changed);month.setOnValueChangedListener(changed);
+                new AlertDialog.Builder(MainActivity.this).setTitle("选择支出日期").setView(row)
+                    .setNegativeButton("取消",null).setPositiveButton("确定",(dialog,which)->{
+                        String value=java.time.LocalDate.of(year.getValue(),month.getValue(),day.getValue()).toString();
+                        web.evaluateJavascript("window.setExpenseDate("+JSONObject.quote(value)+")",null);
+                    }).show();
+            });
+        }
         @JavascriptInterface public void hideKeyboard() {
             runOnUiThread(() -> {
                 if (Build.VERSION.SDK_INT >= 30)

@@ -88,6 +88,10 @@ class Store:
             if self.export() != data:
                 raise OSError("Monthly JSON migration verification failed")
         current = self.export()
+        if any(len(e["at"]) > 10 for e in current["entries"]):
+            for e in current["entries"]:
+                e["at"] = self.entry_date(e["at"])
+            self._write(current)
         if "users" in current and any("version" in u or "actor" in u for u in current["users"]):
             current["users"] = [{"id":u["id"], "name":u["name"], "nameAt":u.get("nameAt",0),
                                  "avatar":u.get("avatar",""), "avatarAt":u.get("avatarAt",0)} for u in current["users"]]
@@ -132,6 +136,15 @@ class Store:
     @staticmethod
     def _valid_month(month):
         return isinstance(month, str) and re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", month) is not None
+
+    @staticmethod
+    def entry_date(value):
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}(?:T.+)?", value):
+            raise ValueError("invalid date")
+        parsed = dt.datetime.fromisoformat(value)
+        if parsed.tzinfo is not None:
+            raise ValueError("local date required")
+        return parsed.date().isoformat()
 
     def _write(self, data):
         months = {}
@@ -273,14 +286,13 @@ class Store:
             amount, when = e["amount"], e["at"]
             if type(amount) is not int or not 1 <= amount <= 99999999999:
                 raise ValueError("invalid amount")
-            parsed = dt.datetime.fromisoformat(when)
-            if parsed.tzinfo is not None or "T" not in when or not self._valid_month(when[:7]):
-                raise ValueError("invalid date")
+            when = self.entry_date(when)
             if e["category"] not in ("daily", "extra", "claim", "giving") or not isinstance(e["note"], str) or len(e["note"]) > 200:
                 raise ValueError("invalid details")
             if "primaryNote" in e and (not isinstance(e["primaryNote"], str) or len(e["primaryNote"]) > 60):
                 raise ValueError("invalid primary note")
             row = {k: e[k] for k in ("id", "amount", "at", "category", "note", "owner", "version", "actor", "deleted")}
+            row["at"] = when
             if "primaryNote" in e:
                 row["primaryNote"] = e["primaryNote"]
             rows.append(row)
@@ -358,9 +370,7 @@ class Store:
             if type(amount) is not int or not 1 <= amount <= 99999999999:
                 raise ValueError("invalid amount")
             when = e["at"]
-            parsed = dt.datetime.fromisoformat(when)
-            if parsed.tzinfo is not None or "T" not in when:
-                raise ValueError("local time required")
+            when = self.entry_date(when)
             if e["category"] not in ("daily", "extra", "claim", "giving") or not isinstance(e["note"], str) or len(e["note"]) > 200:
                 raise ValueError("invalid category or note")
             rows.append((device, eid, amount, when, e["category"], e["note"]))

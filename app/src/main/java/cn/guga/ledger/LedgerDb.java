@@ -14,12 +14,12 @@ public final class LedgerDb extends SQLiteOpenHelper {
         if (instance == null) instance = new LedgerDb(c.getApplicationContext());
         return instance;
     }
-    private LedgerDb(Context c) { super(c, "ledger.db", null, 5); }
+    private LedgerDb(Context c) { super(c, "ledger.db", null, 6); }
     public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE entries(id TEXT PRIMARY KEY, amount INTEGER NOT NULL, at TEXT NOT NULL, category TEXT NOT NULL, note TEXT NOT NULL)");
         db.execSQL("CREATE TABLE meta(device TEXT NOT NULL, revision INTEGER NOT NULL)");
         db.execSQL("INSERT INTO meta VALUES(?,0)", new Object[]{UUID.randomUUID().toString()});
-        onUpgrade(db,1,5);
+        onUpgrade(db,1,6);
         String initial=UUID.randomUUID().toString();
         db.execSQL("UPDATE users SET id=?",new Object[]{initial});
         db.execSQL("UPDATE meta SET currentUser=?",new Object[]{initial});
@@ -47,6 +47,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
             db.execSQL("DROP TABLE users");db.execSQL("ALTER TABLE users_current RENAME TO users");
         }
         if(a<5)db.execSQL("ALTER TABLE entries ADD COLUMN primaryNote TEXT NOT NULL DEFAULT ''");
+        if(a<6)db.execSQL("UPDATE entries SET at=substr(at,1,10)");
     }
     public synchronized JSONObject snapshot() throws JSONException {
         JSONObject result=syncSnapshot(); JSONArray visible=new JSONArray(),rows=result.getJSONArray("records");
@@ -92,14 +93,15 @@ public final class LedgerDb extends SQLiteOpenHelper {
     }
     private void validEntry(JSONObject e) throws Exception {
         UUID.fromString(e.getString("id")); validUser(e.getString("owner"));
-        LocalDateTime.parse(e.getString("at"));
+        String date=e.getString("at");
+        if(date.length()>10)LocalDateTime.parse(date);else java.time.LocalDate.parse(date);
         long amount=e.getLong("amount");
         if(amount<1||amount>99999999999L||!e.getString("category").matches("daily|extra|claim|giving")||e.getString("note").length()>200||e.optString("primaryNote").length()>60)throw new IllegalArgumentException("无效账单");
     }
     private ContentValues entryValues(JSONObject e) throws Exception {
         validEntry(e); ContentValues v=new ContentValues();
         for(String key:new String[]{"id","at","category","note","owner","actor"})v.put(key,e.getString(key));
-        v.put("primaryNote",e.optString("primaryNote",""));v.put("amount",e.getLong("amount"));v.put("version",e.getLong("version"));v.put("deleted",e.getBoolean("deleted")?1:0);return v;
+        v.put("at",e.getString("at").substring(0,10));v.put("primaryNote",e.optString("primaryNote",""));v.put("amount",e.getLong("amount"));v.put("version",e.getLong("version"));v.put("deleted",e.getBoolean("deleted")?1:0);return v;
     }
     private void stamp(SQLiteDatabase db,ContentValues v){
         db.execSQL("UPDATE meta SET clock=clock+1,revision=revision+1");

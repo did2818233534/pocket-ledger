@@ -19,6 +19,21 @@ class SharedSyncTests(unittest.TestCase):
         return dict(protocol=4,device=device,revision=revision,subscriptions=[u["id"] for u in profiles],records=records,users=profiles)
     def row(self,actor,owner=None,version=3,**kw):
         return dict(id=str(uuid.uuid4()),amount=123,at='2026-10-20T12:00',category='daily',note='测试',owner=owner or TEST_USERS[0],version=version,actor=actor,deleted=False,**kw)
+    def test_dates_are_day_only_and_legacy_replay_converges(self):
+        row=self.row(self.a)
+        reply=self.store.accept(self.packet(self.a,[row]))
+        self.assertEqual(reply['records'][0]['at'],'2026-10-20')
+        self.assertEqual(self.store.accept(self.packet(self.a,[row]))['records'][0]['at'],'2026-10-20')
+        edited={**row,'at':'2024-02-29','version':4}
+        self.assertEqual(self.store.accept(self.packet(self.a,[edited],2))['records'][0]['at'],'2024-02-29')
+        for bad in ['2025-02-29','2026-13-01','2026-10-20T12:00+08:00','20261020']:
+            with self.assertRaises(ValueError):self.store.accept(self.packet(self.a,[{**edited,'at':bad,'version':5}],3))
+        stored=self.store.export();stored['entries'][0]['at']='2024-02-29T23:59'
+        self.store._write(stored)
+        restored=s.Store(self.tmp.name)
+        self.assertEqual(restored.export()['entries'][0]['at'],'2024-02-29')
+        self.assertNotIn('23:59',(restored.directory/'2024-02.json').read_text())
+
     def test_primary_note_round_trip_and_legacy_edit(self):
         row=self.row(self.a,primaryNote='吃饭')
         self.store.accept(self.packet(self.a,[row]))
@@ -55,7 +70,7 @@ class SharedSyncTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 store=s.Store(tmp)
                 for e in rows:store.accept(self.packet(e['actor'],[e]))
-                self.assertEqual(store.export()['entries'],[{**expected,'primaryNote':''}])
+                self.assertEqual(store.export()['entries'],[{**expected,'primaryNote':'','at':expected['at'][:10]}])
     def test_rename_users_syncs_independently_of_entries(self):
         users=copy.deepcopy(self.users);users[1].update(name='小明',nameAt=2)
         self.store.accept(self.packet(self.b,[],users=users))

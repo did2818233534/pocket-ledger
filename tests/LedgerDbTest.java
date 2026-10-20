@@ -30,6 +30,7 @@ public final class LedgerDbTest {
             check(state.getJSONArray("users").length()==3,"third user created");
             JSONObject row=entry(owner);db.save(row.toString());JSONObject packet=db.syncSnapshot();
             JSONObject remote=new JSONObject(packet.toString());JSONObject r=remote.getJSONArray("records").getJSONObject(0);
+            check(r.getString("at").equals("2026-10-20"),"new records store day only");
             check(r.getString("primaryNote").equals("吃饭"),"primary note persists");
             long remoteVersion=r.getLong("version")+10;r.put("amount",456).put("version",remoteVersion).put("actor",UUID.randomUUID().toString());
             String fourth=UUID.randomUUID().toString();remote.getJSONArray("users").put(new JSONObject().put("id",fourth).put("name","第四位用户").put("nameAt",System.currentTimeMillis()));
@@ -75,6 +76,7 @@ public final class LedgerDbTest {
             legacy.execSQL("INSERT INTO entries VALUES(?,123,'2026-10-20T12:00','daily','legacy')",new Object[]{id});legacy.setVersion(1);legacy.close();
             db=open();state=db.snapshot();JSONObject migrated=state.getJSONArray("entries").getJSONObject(0);
             check(migrated.getString("id").equals(id)&&migrated.getLong("amount")==123&&migrated.getString("owner").equals(LedgerDb.USER_ONE),"legacy entry preserved with initial owner");
+            check(migrated.getString("at").length()==10,"legacy dates lose hours and minutes");
             check(state.getLong("revision")==7&&state.getString("device").equals(device),"migration preserves revision and device");
             System.out.println("PASS: isolated Android database migration, 4 users, cross-user editing, stale replies, clock, deletion, rename and atomic rejection");
         }finally{if(db!=null)db.close();clean();}

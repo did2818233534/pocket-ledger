@@ -53,3 +53,7 @@ test('note charts merge identical names across categories and parent notes withi
  assert.equal(M.breakdown(rows,'month','note',now).find(g=>g.key==='').amount,50);
  assert.equal(M.breakdown(rows.slice(0,1),'month','note',now)[0].amount,100);
 });
+test('manual dates normalize separators and reject impossible days',()=>{
+ for(const value of ['2024-2-29','2024/02/29','2024.02.29'])assert.equal(M.dateOnly(value),'2024-02-29');
+ for(const value of ['2025-02-29','2026-04-31','2026-13-01','2026-00-01','2026-01-00','2026-10-20T12:00','abc'])assert.throws(()=>M.dateOnly(value));
+});
