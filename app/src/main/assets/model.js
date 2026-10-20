@@ -21,6 +21,11 @@ function breakdown(entries,type,dimension='category',now=new Date()){
  }
  return [...groups.values()].sort((a,b)=>b.amount-a.amount||a.name.localeCompare(b.name,'zh-CN'));
 }
+function reportData(entries,type,dimension='category',excluded=[],now=new Date()){
+ const hidden=new Set(excluded);
+ const included=entries.filter(e=>!hidden.has(dimension==='category'?e.category:(e[dimension]||'').trim()));
+ return {summary:stats(included,type,now),groups:breakdown(entries,type,dimension,now).map(g=>({...g,excluded:hidden.has(g.key)}))};
+}
 // Parse arithmetic as exact rational values; round only the final result to cents.
 function calculateAmount(value){
  const text=String(value).replace(/×/g,'*').replace(/÷/g,'/').replace(/（/g,'(').replace(/）/g,')').trim();
@@ -44,5 +49,5 @@ function calculateAmount(value){
  if(result>99999999999n)throw Error('金额最多 9 位整数、2 位小数');
  return Number(result);
 }
-const api={categories,day,period,stats,breakdown,dateOnly,cents,calculateAmount};if(typeof module!=='undefined')module.exports=api;root.LedgerModel=api;
+const api={categories,day,period,stats,breakdown,reportData,dateOnly,cents,calculateAmount};if(typeof module!=='undefined')module.exports=api;root.LedgerModel=api;
 })(globalThis);

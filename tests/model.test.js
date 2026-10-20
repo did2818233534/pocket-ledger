@@ -57,3 +57,21 @@ test('manual dates normalize separators and reject impossible days',()=>{
  for(const value of ['2024-2-29','2024/02/29','2024.02.29'])assert.equal(M.dateOnly(value),'2024-02-29');
  for(const value of ['2025-02-29','2026-04-31','2026-13-01','2026-00-01','2026-01-00','2026-10-20T12:00','abc'])assert.throws(()=>M.dateOnly(value));
 });
+test('eye exclusions update every statistic while retaining restorable legend items',()=>{
+ const now=new Date(2026,9,20),rows=[
+ {at:'2026-10-20',amount:3000,category:'daily',primaryNote:'吃饭',note:'面'},
+ {at:'2026-10-19',amount:2000,category:'extra',primaryNote:'吃饭',note:'咖啡'},
+ {at:'2026-10-20',amount:1000,category:'claim',primaryNote:'出差',note:'面'},
+ {at:'2026-10-20',amount:500,category:'giving',primaryNote:'',note:''}];
+ const r=M.reportData(rows,'month','primaryNote',['吃饭'],now);
+ assert.equal(r.summary.total,1500);assert.equal(r.summary.count,2);assert.equal(r.summary.totals.claim,1000);
+ assert.equal(r.summary.days.reduce((sum,d)=>sum+d.amount,0),1500);
+ assert.equal(r.groups.find(g=>g.key==='吃饭').excluded,true);assert.equal(r.groups.length,3);
+ assert.equal(M.reportData(rows,'7','note',['面'],now).summary.total,2500);
+ assert.equal(M.reportData(rows,'week','category',['claim'],now).summary.total,5500);
+ assert.equal(M.reportData(rows,'month','note',[''],now).summary.total,6000);
+ const none=M.reportData(rows,'month','category',['daily','extra','claim','giving'],now);
+ assert.equal(none.summary.total,0);assert.equal(none.summary.count,0);assert.ok(none.summary.days.every(d=>d.amount===0));assert.equal(none.groups.length,4);
+ assert.equal(M.reportData(rows,'month','category',[],now).summary.total,6500);
+ assert.equal(M.stats(rows,'month',now).total,6500);
+});
