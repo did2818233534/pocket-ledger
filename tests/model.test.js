@@ -96,3 +96,8 @@ test('reimbursed claims remain in ledger but disappear from every statistic and 
  assert.equal(M.filterEntries(M.statisticalEntries(rows),{primaryNote:'购物'},'2026-10').length,2);
  rows[0].reimbursed=false;assert.equal(M.reportData(rows,'month','category',[],new Date(2026,9,20)).summary.total,6000);
 });
+test('multi-select filters match any chosen value per field and combine fields',()=>{
+ const rows=[{id:'a',at:'2026-10-20',category:'daily',primaryNote:'吃饭',note:'面'},{id:'b',at:'2026-10-20',category:'extra',primaryNote:'购物',note:'鞋'},{id:'c',at:'2026-10-20',category:'claim',primaryNote:'吃饭',note:'面'}];
+ assert.deepEqual(M.filterEntries(rows,{category:['daily','extra'],primaryNote:['吃饭','购物']},'2026-10').map(e=>e.id),['a','b']);
+ assert.deepEqual(M.filterEntries(rows,{category:['daily','extra'],note:['面']},'2026-10').map(e=>e.id),['a']);
+});

@@ -25,7 +25,7 @@ function filterEntries(entries,filters={},month=''){
  return entries.filter(e=>{const date=e.at.slice(0,10);
   if(filters.start||filters.end){if(filters.start&&date<filters.start||filters.end&&date>filters.end)return false}
   else if(month&&!date.startsWith(month))return false;
-  return ['category','primaryNote','note'].every(key=>filters[key]==null||(key==='category'?e.category:(e[key]||'').trim())===filters[key]);
+  return ['category','primaryNote','note'].every(key=>filters[key]==null||(Array.isArray(filters[key])?filters[key].includes(key==='category'?e.category:(e[key]||'').trim()):(key==='category'?e.category:(e[key]||'').trim())===filters[key]));
  }).slice().sort((a,b)=>b.at.localeCompare(a.at)||a.id.localeCompare(b.id));
 }
 function statisticalEntries(entries){return entries.filter(e=>!(e.category==='claim'&&e.reimbursed))}

@@ -127,7 +127,7 @@ public class MainActivity extends Activity {
                 }
                 android.widget.NumberPicker.OnValueChangeListener changed=(picker,oldValue,newValue)->{int maximum=java.time.YearMonth.of(year.getValue(),month.getValue()).lengthOfMonth();day.setValue(Math.min(day.getValue(),maximum));day.setMaxValue(maximum);};
                 year.setOnValueChangedListener(changed);month.setOnValueChangedListener(changed);
-                new AlertDialog.Builder(MainActivity.this).setTitle("选择支出日期").setView(row)
+                new AlertDialog.Builder(MainActivity.this).setTitle("选择日期").setView(row)
                     .setNegativeButton("取消",null).setPositiveButton("确定",(dialog,which)->{
                         String value=java.time.LocalDate.of(year.getValue(),month.getValue(),day.getValue()).toString();
                         web.evaluateJavascript("window.setExpenseDate("+JSONObject.quote(value)+")",null);
