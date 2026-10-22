@@ -273,3 +273,7 @@ v1.3.0 验证：26 项服务端测试、4 项统计测试、独立 Android 数�
 底部导航“设置”包含账本用户、电脑同步、数据与备份、软件更新四个入口；各自进入独立子页面，返回键优先关闭当前下拉菜单，再返回对应上级页面。说明入口使用常规小字和右侧圆圈问号，说明也单独成页。软件更新每次进入恢复“检查更新”。
 
 本版 versionCode 为 6，正式 Release 标签为 `v1.4.1`。构建后将 `dist/小账-1.4.1.apk` 复制为 `dist/PocketLedger-1.4.1.apk`，运行 `python3 scripts/make-release-manifest.py dist/PocketLedger-1.4.1.apk`，将 APK 和 latest.json 一同发布。后续正式版本均发布 GitHub Release，递增版本号，并保持同一签名。
+
+## 1.4.2 图标更新
+
+使用选定的米白账本、深绿书脊与金色书签图标，原始生成图保存于 `artwork/ledger-icon-generated.png`。提供 Android 自适应图标与普通图标资源。versionCode 为 7，发布标签 `v1.4.2`。

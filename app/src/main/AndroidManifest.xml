@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
-    <application android:label="小账 · 本地记账" android:icon="@drawable/ic_ledger" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="true" android:supportsRtl="true">
+    <application android:label="小账 · 本地记账" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="true" android:supportsRtl="true">
         <meta-data android:name="dev.guga.updates.REPOSITORY" android:value="https://github.com/did2818233534/pocket-ledger"/>
         <receiver android:name="dev.guga.updates.UpdateResultReceiver" android:exported="false"><intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/></intent-filter></receiver>
         <activity android:name="dev.guga.updates.UpdateInstallActivity" android:exported="false" android:theme="@android:style/Theme.Material.Light.Dialog.NoActionBar" android:excludeFromRecents="true"/>
