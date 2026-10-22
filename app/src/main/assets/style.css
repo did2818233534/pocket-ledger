@@ -53,3 +53,5 @@ button,a,summary,label,input,select,[role=button],[role=option]{-webkit-tap-high
 .legend-name .claim-qualifier{font-size:9px;font-weight:400;color:var(--muted);white-space:nowrap}
 
 .remote-about>summary{display:inline-block;list-style:none;text-decoration:underline;text-underline-offset:3px;color:var(--green)}.remote-about>summary::-webkit-details-marker{display:none}
+
+.update-toggle{display:flex;align-items:center;justify-content:space-between;gap:16px}.update-toggle input{width:20px;height:20px;margin:0;accent-color:var(--green)}#update-status{overflow-wrap:anywhere}#update-check:disabled{opacity:.6}

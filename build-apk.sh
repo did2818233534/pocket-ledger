@@ -16,16 +16,19 @@ unzip -q -o build/tailscale/mobile.aar -d "$BUILD/mobile"
 sed 's/<manifest /<manifest package="cn.guga.ledger" /' app/src/main/AndroidManifest.xml > "$BUILD/AndroidManifest.xml"
 "$TOOLS/aapt2" link -I "$SDK/platforms/android-36/android.jar" \
   --manifest "$BUILD/AndroidManifest.xml" --rename-manifest-package cn.guga.ledger \
-  --min-sdk-version 26 --target-sdk-version 36 --version-code 4 --version-name 1.3.0 \
+  --min-sdk-version 26 --target-sdk-version 36 --version-code 5 --version-name 1.4.0 \
   --debug-mode --java "$BUILD/gen" -A app/src/main/assets \
   -o "$BUILD/resources.apk" "$BUILD/resources.zip"
 find app/src/main/java "$BUILD/gen" -name '*.java' > "$BUILD/sources.txt"
 "$JDK/bin/javac" -source 17 -target 17 -encoding UTF-8 \
-  -classpath "$SDK/platforms/android-36/android.jar:$BUILD/mobile/classes.jar" -d "$BUILD/classes" @"$BUILD/sources.txt"
+  -classpath "$SDK/platforms/android-36/android.jar:$BUILD/mobile/classes.jar:app/libs/*" -d "$BUILD/classes" @"$BUILD/sources.txt"
 "$JDK/bin/jar" cf "$BUILD/classes.jar" -C "$BUILD/classes" .
 JAVA_HOME="$JDK" "$TOOLS/d8" --lib "$SDK/platforms/android-36/android.jar" \
-  --min-api 26 --output "$BUILD/dex" "$BUILD/classes.jar" "$BUILD/mobile/classes.jar"
+  --min-api 26 --output "$BUILD/dex" "$BUILD/classes.jar" "$BUILD/mobile/classes.jar" app/libs/*.jar
+mkdir -p "$BUILD/jar-resources"
+(cd "$BUILD/jar-resources" && unzip -q -o "$OLDPWD/app/libs/okhttp-4.12.0.jar" 'okhttp3/internal/publicsuffix/*')
 cp "$BUILD/resources.apk" "$BUILD/unsigned.apk"
+(cd "$BUILD/jar-resources" && zip -q -r "$BUILD/unsigned.apk" okhttp3)
 (cd "$BUILD/dex" && zip -q "$BUILD/unsigned.apk" classes*.dex)
 mkdir -p "$BUILD/native/lib"
 cp -r "$BUILD/mobile/jni/"* "$BUILD/native/lib/"
@@ -33,6 +36,6 @@ cp -r "$BUILD/mobile/jni/"* "$BUILD/native/lib/"
 "$TOOLS/zipalign" -f -P 16 4 "$BUILD/unsigned.apk" "$BUILD/aligned.apk"
 JAVA_HOME="$JDK" "$TOOLS/apksigner" sign --ks /opt/android-user/debug.keystore \
   --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android \
-  --out "$PWD/dist/小账-1.3.0.apk" "$BUILD/aligned.apk"
-JAVA_HOME="$JDK" "$TOOLS/apksigner" verify "$PWD/dist/小账-1.3.0.apk"
-printf 'APK: %s/dist/小账-1.3.0.apk\n' "$PWD"
+  --out "$PWD/dist/小账-1.4.0.apk" "$BUILD/aligned.apk"
+JAVA_HOME="$JDK" "$TOOLS/apksigner" verify "$PWD/dist/小账-1.4.0.apk"
+printf 'APK: %s/dist/小账-1.4.0.apk\n' "$PWD"

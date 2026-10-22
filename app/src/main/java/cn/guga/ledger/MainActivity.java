@@ -103,10 +103,11 @@ public class MainActivity extends Activity {
         else SyncService.requestQuietly(this);
     }
     @Override protected void onStop() {
+        dev.guga.updates.ReleaseUpdater.suspend();
         SyncService.pauseSession();stopService(new Intent(this,SyncService.class));Tailnet.suspend();
         web.onPause();web.pauseTimers();super.onStop();
     }
-    @Override protected void onResume() { super.onResume(); Tailnet.foreground=true; }
+    @Override protected void onResume() { super.onResume(); Tailnet.foreground=true; if(android.os.Build.VERSION.SDK_INT>=28){dev.guga.updates.ReleaseUpdater.resume();dev.guga.updates.ReleaseUpdater.checkAutomatically(this);} }
     @Override protected void onPause() { Tailnet.foreground=false; super.onPause(); }
     @Override public void onBackPressed() { handleBack(); }
     private void handleBack() {
@@ -175,6 +176,24 @@ public class MainActivity extends Activity {
                     .put("lastRoute",p.getString("lastRoute",""))
                     .put("tailnet",new JSONObject(Tailnet.status())).toString();
             } catch(Exception e) { return "{\"error\":\"读取账本失败\"}"; }
+        }
+        @JavascriptInterface public String updateState() {
+            try { boolean supported=android.os.Build.VERSION.SDK_INT>=28;
+                return new JSONObject().put("version",getPackageManager().getPackageInfo(getPackageName(),0).versionName)
+                    .put("supported",supported).put("automatic",dev.guga.updates.ReleaseUpdater.isAutomaticEnabled(MainActivity.this))
+                    .put("running",dev.guga.updates.ReleaseUpdater.isRunning())
+                    .put("ready",supported&&dev.guga.updates.ReleaseUpdater.latestDownloadReady(MainActivity.this))
+                    .put("status",dev.guga.updates.ReleaseUpdater.statusMessage()).toString();
+            }catch(Exception e){return "{}";}
+        }
+        @JavascriptInterface public void setUpdateAutomatic(boolean enabled) {
+            if(android.os.Build.VERSION.SDK_INT>=28)runOnUiThread(()->dev.guga.updates.ReleaseUpdater.setAutomaticEnabled(MainActivity.this,enabled));
+        }
+        @JavascriptInterface public void checkUpdate() {
+            if(android.os.Build.VERSION.SDK_INT>=28)dev.guga.updates.ReleaseUpdater.checkManually(MainActivity.this,null);
+        }
+        @JavascriptInterface public void installUpdate() {
+            if(android.os.Build.VERSION.SDK_INT>=28)runOnUiThread(()->dev.guga.updates.ReleaseUpdater.installDownloaded(MainActivity.this));
         }
         @JavascriptInterface public String save(String data) {
             try { LedgerDb.get(MainActivity.this).save(data); autoSync(); return ""; }
