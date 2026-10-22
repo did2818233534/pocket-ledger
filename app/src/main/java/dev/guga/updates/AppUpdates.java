@@ -155,7 +155,7 @@ final class AppUpdates {
     }
     if (!manual && !enabled(c)) return;
     File target = apk(c); target.getParentFile().mkdirs();
-    if (prefs(c).getLong("ready", 0) == release.version && valid(c, target, release.version)) {
+    if (prefs(c).getLong("ready", 0) == release.version && valid(c, target, release.version) && matchesRelease(target,release)) {
       prefs(c).edit().putLong("success",System.currentTimeMillis()).apply();
       readyResult=true;
       status="新版本 " + release.name + " 已下载，请点击安装";
@@ -190,6 +190,12 @@ final class AppUpdates {
       status="新版本 " + release.name + " 已下载，请点击安装";
       notifyReady(c, release.name);
     } finally { partial.delete(); }
+  }
+  static boolean matchesRelease(File file, Release release) throws Exception {
+    if(file.length()!=release.size)return false;
+    MessageDigest digest=MessageDigest.getInstance("SHA-256");
+    try(InputStream input=new FileInputStream(file)){byte[] bytes=new byte[32768];int n;while((n=input.read(bytes))!=-1){if(cancelled||!foreground)throw new IOException("Cancelled");digest.update(bytes,0,n);}}
+    return hex(digest.digest()).equalsIgnoreCase(release.sha);
   }
   static String hex(byte[] bytes) {
     StringBuilder s = new StringBuilder(); for (byte b : bytes) s.append(String.format(java.util.Locale.ROOT, "%02x", b & 255)); return s.toString();

@@ -21,6 +21,7 @@ public final class ReleaseUpdater {
   public static void checkAutomatically(Context context) { AppUpdates.checkAsync(context,false,null); }
   /** Manual checks ignore the daily gate; an existing request is reused. Callback runs on main. */
   public static void checkManually(Context context,Runnable finished) {
+    if(!isRunning()){AppUpdates.readyResult=false;AppUpdates.status="正在检查更新…";}
     AppUpdates.checkAsync(context,true,() -> {
       if(finished==null) return;
       Handler main=new Handler(Looper.getMainLooper());

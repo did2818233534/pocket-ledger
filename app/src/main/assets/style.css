@@ -55,3 +55,5 @@ button,a,summary,label,input,select,[role=button],[role=option]{-webkit-tap-high
 .remote-about>summary{display:inline-block;list-style:none;text-decoration:underline;text-underline-offset:3px;color:var(--green)}.remote-about>summary::-webkit-details-marker{display:none}
 
 .update-toggle{display:flex;align-items:center;justify-content:space-between;gap:16px}.update-toggle input{width:20px;height:20px;margin:0;accent-color:var(--green)}#update-status{overflow-wrap:anywhere}#update-check:disabled{opacity:.6}
+
+.compact-settings{padding:17px 21px}.compact-settings>details>summary{font-size:15px;font-weight:550;color:var(--ink)}#update-version{float:right;font-weight:400}#update-status{margin-bottom:0}#software-update .sync-fold{margin-top:14px;padding-top:12px}

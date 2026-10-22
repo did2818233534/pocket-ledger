@@ -265,3 +265,5 @@ v1.3.0 验证：26 项服务端测试、4 项统计测试、独立 Android 数�
 本项目接入改动：绿色界面、前后台取消接口、移除自动安装、未发布清单的友好提示。上游说明见 `docs/release-updater.md`。依赖固定为 OkHttp 4.12.0、Okio JVM 3.6.0、Kotlin stdlib 1.9.10、JetBrains annotations 13.0，JAR 存于 `app/libs` 供 Gradle 和直接构建共用。
 
 发布流程：运行 `bash build-apk.sh`，然后 `python3 scripts/make-release-manifest.py`；将 `dist/小账-1.4.0.apk` 和 `dist/latest.json` 一起上传至本仓库的正式 Release `v1.4.0`，上传完成后设为 Latest。APK 保持原签名；下次升级同时递增 Gradle、直接构建脚本及清单脚本中的版本。当前产物为 arm64-v8a。仓库只有代码提交而没有 Release 资产时，不能提供在线更新。
+
+更新页默认折叠，重新进入或收起再展开时按钮恢复“检查更新”。只有本次检查确认缓存可用后才显示“安装新版”；其他状态点击均发起检查，运行中的请求复用已有任务。复用安装包前核对发布版本、文件大小、SHA-256 和签名，不重复下载有效的最新安装包。安装成功回调及 MY_PACKAGE_REPLACED 广播清理安装缓存，启动时再次兜底清理。
