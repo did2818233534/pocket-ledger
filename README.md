@@ -267,3 +267,9 @@ v1.3.0 验证：26 项服务端测试、4 项统计测试、独立 Android 数�
 发布流程：运行 `bash build-apk.sh`，然后 `python3 scripts/make-release-manifest.py`；将 `dist/小账-1.4.0.apk` 和 `dist/latest.json` 一起上传至本仓库的正式 Release `v1.4.0`，上传完成后设为 Latest。APK 保持原签名；下次升级同时递增 Gradle、直接构建脚本及清单脚本中的版本。当前产物为 arm64-v8a。仓库只有代码提交而没有 Release 资产时，不能提供在线更新。
 
 更新页默认折叠，重新进入或收起再展开时按钮恢复“检查更新”。只有本次检查确认缓存可用后才显示“安装新版”；其他状态点击均发起检查，运行中的请求复用已有任务。复用安装包前核对发布版本、文件大小、SHA-256 和签名，不重复下载有效的最新安装包。安装成功回调及 MY_PACKAGE_REPLACED 广播清理安装缓存，启动时再次兜底清理。
+
+## 1.4.1 正式发布与设置页
+
+底部导航“设置”包含账本用户、电脑同步、数据与备份、软件更新四个入口；各自进入独立子页面，返回键优先关闭当前下拉菜单，再返回对应上级页面。说明入口使用常规小字和右侧圆圈问号，说明也单独成页。软件更新每次进入恢复“检查更新”。
+
+本版 versionCode 为 6，正式 Release 标签为 `v1.4.1`。构建后将 `dist/小账-1.4.1.apk` 复制为 `dist/PocketLedger-1.4.1.apk`，运行 `python3 scripts/make-release-manifest.py dist/PocketLedger-1.4.1.apk`，将 APK 和 latest.json 一同发布。后续正式版本均发布 GitHub Release，递增版本号，并保持同一签名。
