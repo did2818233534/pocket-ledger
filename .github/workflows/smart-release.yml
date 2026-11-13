@@ -1,0 +1,20 @@
+name: Publish smart release
+on:
+  push:
+    branches: ["release/smart-bootstrap-*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update smart APK and manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload smart-latest release-artifacts/PocketLedgerSmart-1.5.2.apk --clobber
+          gh release upload smart-latest release-artifacts/latest.json --clobber
+          gh release edit smart-latest --title "小账智能版 1.5.2" --notes "长按账单进行多选和批量删除。" --prerelease
+          git tag -f smart-latest "$GITHUB_SHA"
+          git push --force origin refs/tags/smart-latest

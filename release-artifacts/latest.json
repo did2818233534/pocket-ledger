@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "versionCode": 11,
+  "versionName": "1.5.2",
+  "assets": {
+    "universal": {
+      "url": "https://github.com/did2818233534/pocket-ledger/releases/download/smart-latest/PocketLedgerSmart-1.5.2.apk",
+      "sha256": "1ffd2be464e0fa86ad7f914f64c5e15f75f648eb9c6cab45d92faae81eb03510",
+      "size": 17561210
+    }
+  }
+}

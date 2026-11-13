@@ -14,8 +14,9 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <!-- Only used when "识别后从相册删除截图" is switched on. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
-    <application android:label="小账 · 本地记账" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="true" android:supportsRtl="true">
+    <application android:label="小账智能版" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="true" android:supportsRtl="true">
         <meta-data android:name="dev.guga.updates.REPOSITORY" android:value="https://github.com/did2818233534/pocket-ledger"/>
+        <meta-data android:name="dev.guga.updates.MANIFEST_URL" android:value="https://github.com/did2818233534/pocket-ledger/releases/download/smart-latest/latest.json"/>
         <receiver android:name="dev.guga.updates.UpdateResultReceiver" android:exported="false"><intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/></intent-filter></receiver>
         <activity android:name="dev.guga.updates.UpdateInstallActivity" android:exported="false" android:theme="@android:style/Theme.Material.Light.Dialog.NoActionBar" android:excludeFromRecents="true"/>
         <activity android:name=".MainActivity" android:exported="true" android:enableOnBackInvokedCallback="true" android:windowSoftInputMode="adjustResize">
@@ -28,7 +29,7 @@
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/></intent-filter>
             <intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/></intent-filter>
         </receiver>
-        <activity android:name=".ShareActivity" android:exported="true" android:label="小账识别记账" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" android:noHistory="true">
+        <activity android:name=".ShareActivity" android:exported="true" android:label="小账智能版识别记账" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" android:noHistory="true">
             <intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="image/*"/></intent-filter>
         </activity>
     </application>

@@ -12,6 +12,8 @@ The service keeps no images or results.
 import hmac
 import json
 import os
+import re
+from pathlib import Path
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -90,6 +92,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             return self.reply(200, {"ok": True})
+        if re.fullmatch(r"/updates/(latest\.json|PocketLedgerSmart-[0-9.]+\.apk)", self.path):
+            path = Path(os.environ.get("UPDATE_DIR", "/updates")) / self.path.rsplit("/", 1)[-1]
+            try:
+                with path.open("rb") as source:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json" if path.suffix == ".json" else "application/vnd.android.package-archive")
+                    self.send_header("Content-Length", str(path.stat().st_size))
+                    self.end_headers()
+                    while chunk := source.read(65536):
+                        self.wfile.write(chunk)
+            except FileNotFoundError:
+                self.reply(404, {"error": "not found"})
+            return
         self.reply(404, {"error": "not found"})
 
     def do_POST(self):
@@ -109,7 +124,7 @@ class Handler(BaseHTTPRequestHandler):
         result = {"lines": lines, "ms": round((time.perf_counter() - start) * 1000)}
         if self.path == "/parse":
             result["fields"] = parse(lines, height=image.shape[0])
-            listed = parse_list(lines, width=image.shape[1], today=self.screenshot_day())
+            listed = parse_list(lines, width=image.shape[1], today=self.screenshot_day(), include_income=self.headers.get("X-Cashflow") == "1")
             if listed:
                 result.update(listed)
         self.reply(200, result)

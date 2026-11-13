@@ -130,6 +130,15 @@ class ReceiptTest(unittest.TestCase):
         top, bottom, width = result["entries"][0]["region"]
         self.assertTrue(top < 1100 and 1300 < bottom <= 1490 and width == 1440)
 
+    def test_income_in_bill_list_requires_opt_in(self):
+        sample = [*row(100, "工资", "+3000.00", "收入", "今天13:04"),
+                  *row(500, "超市", "-20.00", "日用百货", "今天14:04")]
+        old = parse_list(sample, 1440, date(2026, 11, 13))
+        new = parse_list(sample, 1440, date(2026, 11, 13), include_income=True)
+        self.assertEqual([e['kind'] for e in old['entries']], ['expense'])
+        self.assertEqual([e['kind'] for e in new['entries']], ['income', 'expense'])
+        self.assertEqual(new['entries'][0]['amount'], 300000)
+
     def test_single_bills_are_not_lists(self):
         for screen in (ALIPAY_FOREIGN, WECHAT_SUCCESS, APP_STORE, ALIPAY_FUND, ALIPAY_MEAL, []):
             self.assertIsNone(parse_list(screen))

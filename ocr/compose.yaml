@@ -13,6 +13,8 @@ services:
     environment:
       OCR_TOKEN: ${OCR_TOKEN:-}
       OCR_THREADS: ${OCR_THREADS:-}
+    volumes:
+      - "${UPDATE_DIR:-./releases}:/updates:ro"
     restart: unless-stopped
     # No CPU quota: under a quota onnxruntime's threads get throttled and inference is ~2.5x slower.
     # On a shared machine cap OCR_THREADS instead; the low CPU weight only matters under contention.

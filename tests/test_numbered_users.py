@@ -28,6 +28,19 @@ class NumberedUserTests(SharedSyncTests):
         self.assertEqual(self.store.accept(self.numbered(self.b,[],subscriptions=['1']))['users'][0]['id'],'1')
         missing=self.store.accept(self.numbered(self.b,[],subscriptions=['3']))
         self.assertEqual(missing['missingUsers'],['3']);self.assertEqual(missing['users'],[])
+    def test_income_sync_is_hidden_from_older_clients_and_not_deleted(self):
+        user={**self.users[0], 'id':'1'}
+        income={**self.row(self.a, owner='1'), 'category':'income'}
+        expense={**self.row(self.a, owner='1'), 'category':'daily'}
+        modern={**self.numbered(self.a,[user],[income,expense]), 'cashflow':1}
+        reply=self.store.accept(modern)
+        self.assertEqual({r['category'] for r in reply['records']},{'income','daily'})
+        old=self.store.accept(self.numbered(self.b,[user],[]))
+        self.assertEqual([r['category'] for r in old['records']],['daily'])
+        again=self.store.accept({**self.numbered(self.a,[user],[]), 'cashflow':1})
+        self.assertEqual({r['category'] for r in again['records']},{'income','daily'})
+        with self.assertRaises(ValueError):
+            self.store.accept(self.numbered(self.b,[user],[income]))
     def test_invalid_request_does_not_migrate_or_allocate(self):
         before=copy.deepcopy(self.store.export());u=self.users[0]
         with self.assertRaises(ValueError):self.store.accept(self.numbered(self.a,[{**u,'name':''}]))

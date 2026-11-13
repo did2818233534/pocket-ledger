@@ -19,7 +19,7 @@ test('all categories, no future spending, zero-filled days and exact cents',()=>
   const s=M.stats(entries,'month',new Date(2026,9,20));
   assert.equal(s.total,900);assert.equal(s.days.length,20);assert.equal(s.days[0].amount,0);
   assert.equal(s.days[19].amount,310);assert.equal(s.count,3);
-  assert.deepEqual(s.totals,{daily:101,extra:590,claim:209,giving:0});
+  assert.deepEqual(s.totals,{daily:101,extra:590,claim:209,giving:0,income:0});
 });
 test('money parsing never rounds fractions silently',()=>{
   assert.equal(M.cents('0.29'),29);assert.equal(M.cents('12.3'),1230);
@@ -100,4 +100,14 @@ test('multi-select filters match any chosen value per field and combine fields',
  const rows=[{id:'a',at:'2026-10-20',category:'daily',primaryNote:'吃饭',note:'面'},{id:'b',at:'2026-10-20',category:'extra',primaryNote:'购物',note:'鞋'},{id:'c',at:'2026-10-20',category:'claim',primaryNote:'吃饭',note:'面'}];
  assert.deepEqual(M.filterEntries(rows,{category:['daily','extra'],primaryNote:['吃饭','购物']},'2026-10').map(e=>e.id),['a','b']);
  assert.deepEqual(M.filterEntries(rows,{category:['daily','extra'],note:['面']},'2026-10').map(e=>e.id),['a']);
+});
+
+test('cash-flow filters and net totals keep income positive and spending negative',()=>{
+ const rows=[{category:'daily',amount:10000},{category:'income',amount:20000},{category:'extra',amount:5000}];
+ assert.equal(M.cashflowTotal(rows,'expense'),15000);
+ assert.equal(M.cashflowTotal(rows,'income'),20000);
+ assert.equal(M.cashflowTotal(rows,'all'),5000);
+ assert.equal(M.cashflowTotal(rows.slice(0,1),'all'),-10000);
+ assert.deepEqual(M.cashflowEntries(rows,'income'),[rows[1]]);
+ assert.throws(()=>M.cashflowEntries(rows,'other'));
 });

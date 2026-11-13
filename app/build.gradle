@@ -3,11 +3,11 @@ android {
     namespace 'cn.guga.ledger'
     compileSdk 36
     defaultConfig {
-        applicationId 'cn.guga.ledger'
+        applicationId 'cn.guga.ledger.smart'
         minSdk 26
         targetSdk 36
-        versionCode 8
-        versionName '1.4.3'
+        versionCode 11
+        versionName '1.5.2'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

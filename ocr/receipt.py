@@ -277,13 +277,13 @@ def _list_day(m, ref, header):
         return None
 
 
-def parse_list(raw_lines, width=None, today=None):
+def parse_list(raw_lines, width=None, today=None, include_income=False):
     """Expense rows of a bill list, or None when the screen is not a bill list.
 
     Returns {"entries": [fields...], "skipped": n}; each entry has the same keys as parse() plus
     "unsure" (amount shown without a minus sign) and "region" ([top, bottom, image width] of the row in pixels).
-    Income, refunds, transfers between one's own accounts and investments, and closed or fully
-    refunded orders are counted in "skipped".
+    Income and refunds are included only when include_income is enabled. Transfers between
+    one's own accounts, investments, closed and fully refunded orders are counted as skipped.
     """
     lines = sorted((Line(l["text"], l["box"]) for l in raw_lines if l.get("text", "").strip()), key=lambda l: l.cy)
     if not lines:
@@ -330,20 +330,22 @@ def parse_list(raw_lines, width=None, today=None):
         amount, sign = _cents(m["num"]), m["sign"]
         title = title.rstrip(".…").strip()
         joined = f"{title} {status or ''}"
-        if (amount == 0 or sign == "+" or any(word in joined for word in _LIST_VOID)
-                or title.startswith("退款") or _CATEGORY_KIND.get(category or "") in ("income", "transfer")
-                or category == "账户存取" or any(word in title for word in _LIST_NOT_SPENDING + _INCOME + _TRANSFER)):
+        income = sign == "+" or title.startswith("退款") or _CATEGORY_KIND.get(category or "") == "income" or any(word in title for word in _INCOME)
+        if (amount == 0 or any(word in joined for word in _LIST_VOID)
+                or category == "账户存取" or _CATEGORY_KIND.get(category or "") == "transfer"
+                or any(word in title for word in _LIST_NOT_SPENDING + _TRANSFER)
+                or (income and not include_income)):
             skipped += 1
             continue
         hour, minute = int(when["H"]), int(when["M"])
         entries.append({
-            "amount": amount, "kind": "expense", "confident": True, "currency": "CNY", "foreign": "",
+            "amount": amount, "kind": "income" if income else "expense", "confident": True, "currency": "CNY", "foreign": "",
             "date": day.isoformat() if day else None,
             "time": f"{hour:02d}:{minute:02d}:00" if hour < 24 and minute < 60 else None,
             "merchant": title[:60], "detail": "", "method": "", "category": (category or "")[:30],
             "primaryNote": _CATEGORY_PRIMARY.get(category or "") or _primary_hint(title),
             # Without a minus sign the row may not be a completed payment (e.g. 待收货, 闲鱼 担保交易).
-            "unsure": sign != "-" or any(word in title for word in ("转账", "红包")),
+            "unsure": (not income and sign != "-") or any(word in title for word in ("转账", "红包")),
             "region": [int(top - anchor.h * 0.6), int(bottom), int(width)],
         })
     if len(entries) + skipped < 2:
