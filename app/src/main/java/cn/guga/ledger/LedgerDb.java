@@ -14,12 +14,12 @@ public final class LedgerDb extends SQLiteOpenHelper {
         if (instance == null) instance = new LedgerDb(c.getApplicationContext());
         return instance;
     }
-    private LedgerDb(Context c) { super(c, "ledger.db", null, 8); }
+    private LedgerDb(Context c) { super(c, "ledger.db", null, 9); }
     public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE entries(id TEXT PRIMARY KEY, amount INTEGER NOT NULL, at TEXT NOT NULL, category TEXT NOT NULL, note TEXT NOT NULL)");
         db.execSQL("CREATE TABLE meta(device TEXT NOT NULL, revision INTEGER NOT NULL)");
         db.execSQL("INSERT INTO meta VALUES(?,0)", new Object[]{UUID.randomUUID().toString()});
-        onUpgrade(db,1,8);
+        onUpgrade(db,1,9);
         String initial=UUID.randomUUID().toString();
         db.execSQL("UPDATE users SET id=?",new Object[]{initial});
         db.execSQL("UPDATE meta SET currentUser=?",new Object[]{initial});
@@ -50,6 +50,64 @@ public final class LedgerDb extends SQLiteOpenHelper {
         if(a<6)db.execSQL("UPDATE entries SET at=substr(at,1,10)");
         if(a<7)db.execSQL("ALTER TABLE entries ADD COLUMN reimbursed INTEGER NOT NULL DEFAULT 0");
         if(a<8)db.execSQL("CREATE TABLE user_aliases(oldId TEXT PRIMARY KEY,id TEXT NOT NULL)");
+        // Screenshot drafts stay on this phone; only an expense saved from a draft is synced.
+        if(a<9)db.execSQL("CREATE TABLE drafts(id TEXT PRIMARY KEY,source TEXT UNIQUE NOT NULL,uri TEXT NOT NULL,app TEXT NOT NULL DEFAULT '',takenAt INTEGER NOT NULL,status TEXT NOT NULL,error TEXT NOT NULL DEFAULT '',attempts INTEGER NOT NULL DEFAULT 0,fields TEXT NOT NULL DEFAULT '{}')");
+    }
+    public synchronized boolean queueDraft(String source,String uri,String app,long takenAt){
+        ContentValues v=new ContentValues();v.put("id",UUID.randomUUID().toString());v.put("source",source);v.put("uri",uri);v.put("app",app==null?"":app);v.put("takenAt",takenAt);v.put("status","queued");
+        return getWritableDatabase().insertWithOnConflict("drafts",null,v,SQLiteDatabase.CONFLICT_IGNORE)!=-1;
+    }
+    /** Drafts still waiting for recognition; failures are retried a few times. */
+    public synchronized java.util.List<String[]> pendingDrafts(){
+        java.util.List<String[]> rows=new java.util.ArrayList<>();
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT id,uri,source,app,takenAt FROM drafts WHERE status='queued' OR (status='error' AND attempts<4 AND error LIKE '连不上%') ORDER BY takenAt",null)){
+            while(c.moveToNext())rows.add(new String[]{c.getString(0),c.getString(1),c.getString(2),c.getString(3),String.valueOf(c.getLong(4))});
+        }
+        return rows;
+    }
+    /** Adds an already recognized draft, e.g. one row of a bill list; null if that source exists. */
+    public synchronized String addDraft(String source,String uri,String app,long takenAt,String status,JSONObject fields){
+        String id=UUID.randomUUID().toString();ContentValues v=new ContentValues();
+        v.put("id",id);v.put("source",source);v.put("uri",uri);v.put("app",app==null?"":app);v.put("takenAt",takenAt);v.put("status",status);v.put("fields",fields.toString());
+        return getWritableDatabase().insertWithOnConflict("drafts",null,v,SQLiteDatabase.CONFLICT_IGNORE)!=-1?id:null;
+    }
+    public synchronized int draftsUsing(String uri){
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT COUNT(*) FROM drafts WHERE uri=?",new String[]{uri})){c.moveToFirst();return c.getInt(0);}
+    }
+    public synchronized void finishDraft(String id,String status,String error,JSONObject fields){
+        ContentValues v=new ContentValues();v.put("status",status);v.put("error",error==null?"":error);if(fields!=null)v.put("fields",fields.toString());
+        SQLiteDatabase db=getWritableDatabase();db.update("drafts",v,"id=?",new String[]{id});
+        if("error".equals(status))db.execSQL("UPDATE drafts SET attempts=attempts+1 WHERE id=?",new Object[]{id});
+    }
+    public synchronized void moveDraft(String id,String uri){getWritableDatabase().execSQL("UPDATE drafts SET uri=? WHERE id=?",new Object[]{uri,id});}
+    public synchronized String draftUri(String id){
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT uri FROM drafts WHERE id=?",new String[]{id})){return c.moveToFirst()?c.getString(0):null;}
+    }
+    public synchronized void retryDraft(String id){getWritableDatabase().execSQL("UPDATE drafts SET status='queued',attempts=0,error='' WHERE id=?",new Object[]{id});}
+    /** Removes a draft and returns its image location so a private copy can be deleted. */
+    public synchronized String removeDraft(String id){
+        String uri=null;SQLiteDatabase db=getWritableDatabase();
+        try(Cursor c=db.rawQuery("SELECT uri FROM drafts WHERE id=?",new String[]{id})){if(c.moveToFirst())uri=c.getString(0);}
+        db.delete("drafts","id=?",new String[]{id});return uri;
+    }
+    private JSONObject draftRow(Cursor c) throws JSONException {
+        return new JSONObject().put("id",c.getString(0)).put("app",c.getString(1)).put("appName",Capture.appName(c.getString(1))).put("takenAt",c.getLong(2)).put("status",c.getString(3))
+            .put("error",c.getString(4)).put("fields",new JSONObject(c.getString(5)));
+    }
+    public synchronized boolean hasEntry(long amount,String date){
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM entries WHERE deleted=0 AND amount=? AND at=? LIMIT 1",new String[]{String.valueOf(amount),date})){return c.moveToFirst();}
+    }
+    public synchronized JSONObject draft(String id){
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT id,app,takenAt,status,error,fields FROM drafts WHERE id=?",new String[]{id})){
+            return c.moveToFirst()?draftRow(c):null;
+        }catch(JSONException e){return null;}
+    }
+    public synchronized JSONArray drafts() throws JSONException {
+        JSONArray rows=new JSONArray();
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT id,app,takenAt,status,error,fields FROM drafts ORDER BY takenAt DESC LIMIT 200",null)){
+            while(c.moveToNext())rows.put(draftRow(c));
+        }
+        return rows;
     }
     public synchronized JSONObject snapshot() throws JSONException {
         JSONObject result=syncSnapshot(); JSONArray visible=new JSONArray(),rows=result.getJSONArray("records");

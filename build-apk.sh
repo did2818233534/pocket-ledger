@@ -34,7 +34,7 @@ mkdir -p "$BUILD/native/lib"
 cp -r "$BUILD/mobile/jni/"* "$BUILD/native/lib/"
 (cd "$BUILD/native" && zip -q -r "$BUILD/unsigned.apk" lib)
 "$TOOLS/zipalign" -f -P 16 4 "$BUILD/unsigned.apk" "$BUILD/aligned.apk"
-JAVA_HOME="$JDK" "$TOOLS/apksigner" sign --ks /opt/android-user/debug.keystore \
+JAVA_HOME="$JDK" "$TOOLS/apksigner" sign --ks "${KEYSTORE:-/opt/android-user/debug.keystore}" \
   --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android \
   --out "$PWD/dist/小账-1.4.3.apk" "$BUILD/aligned.apk"
 JAVA_HOME="$JDK" "$TOOLS/apksigner" verify "$PWD/dist/小账-1.4.3.apk"

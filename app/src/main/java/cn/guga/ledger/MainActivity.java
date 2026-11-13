@@ -31,6 +31,8 @@ public class MainActivity extends Activity {
     }
     private WebView web;
     private String avatarUser;
+    /** Draft to open once the page is ready (launched from a capture notification). */
+    private String launchDraft;
     private boolean handlingBack;
     private android.window.OnBackInvokedCallback backCallback;
     public void onCreate(Bundle state) {
@@ -90,6 +92,7 @@ public class MainActivity extends Activity {
         setContentView(root);
         root.requestApplyInsets();
         web.loadUrl("https://ledger.local/index.html");
+        if(Capture.OPEN_DRAFT.equals(getIntent().getAction()))launchDraft=getIntent().getStringExtra("draft");
         if (Build.VERSION.SDK_INT >= 33) {
             backCallback = this::handleBack;
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
@@ -101,6 +104,18 @@ public class MainActivity extends Activity {
         SyncService.resumeSession();Tailnet.resume(this);
         if(getSharedPreferences("sync",0).getBoolean("enabled",false))startForegroundService(new Intent(this,SyncService.class));
         else SyncService.requestQuietly(this);
+        if(Capture.enabled(this)){Capture.schedule(this);Capture.runNow(this);}
+    }
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);setIntent(intent);
+        if(Capture.OPEN_DRAFT.equals(intent.getAction())){
+            String id=intent.getStringExtra("draft");
+            if(id!=null)web.evaluateJavascript("window.openDraft&&window.openDraft("+JSONObject.quote(id)+")",null);
+        }
+    }
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) {
+        super.onRequestPermissionsResult(request,permissions,results);
+        if(request==8){if(Capture.canReadImages(this))Capture.schedule(this);web.evaluateJavascript("refreshProfileView()",null);}
     }
     @Override protected void onStop() {
         dev.guga.updates.ReleaseUpdater.suspend();
@@ -174,7 +189,8 @@ public class MainActivity extends Activity {
                     .put("syncedRevision",p.getLong("syncedRevision",-1))
                     .put("remoteEnabled",p.getBoolean("remoteEnabled",false)).put("remoteHost",p.getString("remoteHost",""))
                     .put("lastRoute",p.getString("lastRoute",""))
-                    .put("tailnet",new JSONObject(Tailnet.status())).toString();
+                    .put("tailnet",new JSONObject(Tailnet.status()))
+                    .put("drafts",LedgerDb.get(MainActivity.this).drafts()).put("capture",Capture.state(MainActivity.this)).toString();
             } catch(Exception e) { return "{\"error\":\"读取账本失败\"}"; }
         }
         @JavascriptInterface public String updateState() {
@@ -283,6 +299,59 @@ public class MainActivity extends Activity {
             getSharedPreferences("sync",0).edit().putBoolean("enabled",false).putString("status","定时同步已暂停，打开应用或保存更改时仍会同步").apply();
             stopService(new Intent(MainActivity.this,SyncService.class));
         }
+        @JavascriptInterface public String takeLaunchDraft() { String id=launchDraft; launchDraft=null; return id==null?"":id; }
+        @JavascriptInterface public String configureCapture(boolean enabled,String url,String token,boolean allApps,boolean deleteAfter) {
+            String error=Capture.configure(MainActivity.this,enabled,url,token,allApps,deleteAfter);
+            if(error.isEmpty()&&deleteAfter&&!Capture.canDelete()&&Build.VERSION.SDK_INT>=30)runOnUiThread(()->{
+                try{startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,android.net.Uri.parse("package:"+getPackageName())));}
+                catch(Exception e){startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));}
+            });
+            if(error.isEmpty()&&enabled)runOnUiThread(()->{
+                java.util.List<String> missing=new java.util.ArrayList<>();
+                if(!Capture.canReadImages(MainActivity.this))missing.add(Capture.imagePermission());
+                if(Build.VERSION.SDK_INT>=33&&checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=android.content.pm.PackageManager.PERMISSION_GRANTED)missing.add("android.permission.POST_NOTIFICATIONS");
+                if(!missing.isEmpty())requestPermissions(missing.toArray(new String[0]),8);
+            });
+            return error;
+        }
+        @JavascriptInterface public void testCapture() {
+            new Thread(()->{
+                String error=Capture.health(MainActivity.this);
+                runOnUiThread(()->web.evaluateJavascript("toast("+JSONObject.quote(error.isEmpty()?"识别服务连接正常":error)+")",null));
+            },"ledger-capture-test").start();
+        }
+        @JavascriptInterface public void pickScreenshot() {
+            runOnUiThread(()->{
+                Intent pick=new Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
+                try{startActivityForResult(pick,12);}catch(Exception e){android.widget.Toast.makeText(MainActivity.this,"无法打开图片选择器",0).show();}
+            });
+        }
+        /** Background recognition needs the app exempt from battery limits; HyperOS also freezes it otherwise. */
+        @JavascriptInterface public void openBatterySettings() {
+            runOnUiThread(()->{
+                android.net.Uri pkg=android.net.Uri.parse("package:"+getPackageName());
+                boolean exempt=getSystemService(android.os.PowerManager.class).isIgnoringBatteryOptimizations(getPackageName());
+                Intent intent=exempt?new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,pkg)
+                    :new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,pkg);
+                try{startActivity(intent);}catch(Exception e){startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,pkg));}
+            });
+        }
+        @JavascriptInterface public void showDraftImage(String id) {
+            new Thread(()->{
+                try{
+                    android.graphics.Bitmap bitmap=Capture.preview(MainActivity.this,id,getResources().getDisplayMetrics().widthPixels);
+                    runOnUiThread(()->{
+                        if(isFinishing()||isDestroyed())return;
+                        android.widget.ImageView image=new android.widget.ImageView(MainActivity.this);image.setImageBitmap(bitmap);image.setAdjustViewBounds(true);
+                        android.widget.ScrollView scroll=new android.widget.ScrollView(MainActivity.this);scroll.addView(image);
+                        new LedgerDialogBuilder(MainActivity.this).setView(scroll).setPositiveButton("关闭",null).setOnDismissListener(d->bitmap.recycle()).show();
+                    });
+                }catch(Exception e){runOnUiThread(()->android.widget.Toast.makeText(MainActivity.this,"原截图已不在了",0).show());}
+            },"ledger-capture-preview").start();
+        }
+        @JavascriptInterface public void dismissDraft(String id) { Capture.forget(MainActivity.this,id); }
+        @JavascriptInterface public String saveDraft(String id) { return Capture.saveDraft(MainActivity.this,id); }
+        @JavascriptInterface public void retryDraft(String id) { LedgerDb.get(MainActivity.this).retryDraft(id); Capture.runNow(MainActivity.this); }
         @JavascriptInterface public void exportData() {
             runOnUiThread(() -> {
                 Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/json").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"小账备份.json");
@@ -302,6 +371,14 @@ public class MainActivity extends Activity {
                         runOnUiThread(()->{if(!isDestroyed()){web.evaluateJavascript("refreshProfileView()",null);android.widget.Toast.makeText(this,"头像已更新，等待同步",0).show();}});
                     }catch(Exception e){runOnUiThread(()->android.widget.Toast.makeText(this,"图片读取失败，请换一张图片",0).show());}
                 },"ledger-avatar").start();
+            }
+            return;
+        }
+        if(request==12){
+            if(result==RESULT_OK&&data!=null&&data.getData()!=null){
+                android.net.Uri uri=data.getData();
+                try{Capture.queueShared(this,uri);android.widget.Toast.makeText(this,"正在识别…",0).show();}
+                catch(Exception e){android.widget.Toast.makeText(this,"图片读取失败，请换一张",0).show();}
             }
             return;
         }

@@ -19,6 +19,8 @@
     <div class="sheet-handle" aria-hidden="true"></div>
     <form id="entry-form">
       <div class="sheet-head"><div><h2 id="edit-title">记一笔</h2><p class="sheet-subtitle">记下生活里的每一笔</p></div><button type="button" id="cancel" class="text-button" autofocus>取消</button></div>
+      <p id="draft-hint" class="draft-hint" hidden></p>
+      <button type="button" id="draft-image" class="text-button draft-image" hidden>查看原截图</button>
       <div class="amount-panel"><label for="amount">支出金额<span>人民币 CNY</span></label><div class="amount-input"><span aria-hidden="true">¥</span><input id="amount" type="text" inputmode="decimal" placeholder="0.00" required maxlength="120" enterkeyhint="done" aria-describedby="amount-hint" autocomplete="off"></div></div>
       <div class="amount-calculator" role="group" aria-label="金额计算器"><button type="button" data-amount-key="+" aria-label="加">+</button><button type="button" data-amount-key="-" aria-label="减">−</button><button type="button" data-amount-key="*" aria-label="乘">×</button><button type="button" data-amount-key="/" aria-label="除">÷</button><button type="button" data-amount-key="(" aria-label="左括号">(</button><button type="button" data-amount-key=")" aria-label="右括号">)</button><button type="button" id="amount-equals" aria-label="计算金额">=</button></div>
       <p id="amount-hint" class="amount-hint">支持括号和四则运算 · 结果四舍五入到分</p>
