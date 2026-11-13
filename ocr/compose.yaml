@@ -1,0 +1,20 @@
+services:
+  ocr:
+    build:
+      context: .
+      args:
+        # Mirror for mainland China; drop or replace elsewhere.
+        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+    image: pocket-ledger-ocr
+    container_name: pocket-ledger-ocr
+    ports:
+      # Behind a reverse proxy on the same machine, bind to loopback, e.g. OCR_BIND=127.0.0.1:18090.
+      - "${OCR_BIND:-18086}:18086"
+    environment:
+      OCR_TOKEN: ${OCR_TOKEN:-}
+      OCR_THREADS: ${OCR_THREADS:-}
+    restart: unless-stopped
+    # No CPU quota: under a quota onnxruntime's threads get throttled and inference is ~2.5x slower.
+    # On a shared machine cap OCR_THREADS instead; the low CPU weight only matters under contention.
+    cpu_shares: 256
+    mem_limit: 1500m
