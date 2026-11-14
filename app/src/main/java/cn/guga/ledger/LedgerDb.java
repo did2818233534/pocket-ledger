@@ -97,6 +97,9 @@ public final class LedgerDb extends SQLiteOpenHelper {
     public synchronized boolean hasEntry(long amount,String date){
         try(Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM entries WHERE deleted=0 AND amount=? AND at=? LIMIT 1",new String[]{String.valueOf(amount),date})){return c.moveToFirst();}
     }
+    public synchronized boolean hasEntry(long amount,String date,boolean income){
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM entries WHERE deleted=0 AND amount=? AND at=? AND (category='income')=? LIMIT 1",new String[]{String.valueOf(amount),date,income?"1":"0"})){return c.moveToFirst();}
+    }
     public synchronized JSONObject draft(String id){
         try(Cursor c=getReadableDatabase().rawQuery("SELECT id,app,takenAt,status,error,fields FROM drafts WHERE id=?",new String[]{id})){
             return c.moveToFirst()?draftRow(c):null;
@@ -117,7 +120,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
         return result.put("entries",visible).put("users",profiles(true));
     }
     public synchronized JSONObject syncSnapshot() throws JSONException {
-        JSONObject result = new JSONObject().put("protocol",5);
+        JSONObject result = new JSONObject().put("protocol",5).put("cashflow",1);
         SQLiteDatabase db = getReadableDatabase();
         try (Cursor c = db.rawQuery("SELECT device,revision FROM meta", null)) {
             c.moveToFirst(); result.put("device", c.getString(0)); result.put("revision", c.getLong(1));
@@ -179,7 +182,7 @@ public final class LedgerDb extends SQLiteOpenHelper {
         String date=e.getString("at");
         if(date.length()>10)LocalDateTime.parse(date);else java.time.LocalDate.parse(date);
         long amount=e.getLong("amount");
-        if(amount<1||amount>99999999999L||!e.getString("category").matches("daily|extra|claim|giving")||e.getString("note").length()>200||e.optString("primaryNote").length()>60)throw new IllegalArgumentException("无效账单");
+        if(amount<1||amount>99999999999L||!e.getString("category").matches("daily|extra|claim|giving|income")||e.getString("note").length()>200||e.optString("primaryNote").length()>60)throw new IllegalArgumentException("无效账单");
     }
     private ContentValues entryValues(JSONObject e) throws Exception {
         e.put("owner",canonicalUser(e.getString("owner")));validEntry(e); ContentValues v=new ContentValues();
@@ -215,6 +218,22 @@ public final class LedgerDb extends SQLiteOpenHelper {
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
         try(Cursor c=db.rawQuery("SELECT id FROM entries WHERE id=? AND deleted=0",new String[]{id})){
             if(c.moveToFirst()){ContentValues v=new ContentValues();v.put("deleted",1);stamp(db,v);db.update("entries",v,"id=?",new String[]{id});}
+            db.setTransactionSuccessful();
+        }finally{db.endTransaction();}
+    }
+    public synchronized void deleteMany(JSONArray ids) throws Exception {
+        if(ids.length()<1||ids.length()>10000)throw new IllegalArgumentException("请选择账单");
+        SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
+        try {
+            java.util.HashSet<String> seen=new java.util.HashSet<>();
+            for(int i=0;i<ids.length();i++){
+                String id=ids.getString(i);UUID.fromString(id);
+                if(!seen.add(id))throw new IllegalArgumentException("重复账单");
+                try(Cursor c=db.rawQuery("SELECT id FROM entries WHERE id=? AND deleted=0",new String[]{id})){
+                    if(!c.moveToFirst())throw new IllegalArgumentException("账单已变化，请重新选择");
+                }
+            }
+            for(String id:seen){ContentValues v=new ContentValues();v.put("deleted",1);stamp(db,v);db.update("entries",v,"id=?",new String[]{id});}
             db.setTransactionSuccessful();
         }finally{db.endTransaction();}
     }

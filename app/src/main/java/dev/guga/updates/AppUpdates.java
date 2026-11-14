@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.json.*;
 
 final class AppUpdates {
+  static final String SERVER_UPDATES = "https://ocr.did2818233534.camdvr.org/updates/";
   static final int NOTICE = 50202;
   static final long MAX_APK = 200 * 1024 * 1024L;
   static final AtomicBoolean running = new AtomicBoolean();
@@ -67,7 +68,7 @@ final class AppUpdates {
         cleanupInstalled(c);
         if (!due(prefs(c).getString("checkedDay", ""), today(), manual, enabled(c))) return;
         readyResult=false;
-        status="正在连接 GitHub…";
+        status="正在连接更新服务器…";
         prefs(c).edit().putString("checkedDay", today()).apply();
         check(c, manual);
       } catch (Exception error) {
@@ -104,7 +105,7 @@ final class AppUpdates {
     if (asset == null) throw new IOException("Unsupported ABI");
     String url=asset.getString("url"), sha=asset.getString("sha256");
     long size=asset.getLong("size");
-    if (!url.startsWith(repository + "/releases/download/") || !url.endsWith(".apk") ||
+    if (!(url.startsWith(repository + "/releases/download/") || url.startsWith(SERVER_UPDATES)) || !url.endsWith(".apk") ||
         !sha.matches("[a-fA-F0-9]{64}") || size <= 0 || size > MAX_APK) throw new IOException("Invalid release");
     return new Release(version, size, url, sha, root.getString("versionName"));
   }
@@ -127,12 +128,20 @@ final class AppUpdates {
     check(c, manual, activeClient, installed);
   }
   static void check(Context c, boolean manual, okhttp3.OkHttpClient client, PackageInfo installed) throws Exception {
+    try { checkFrom(c,manual,client,installed,SERVER_UPDATES+"latest.json"); }
+    catch (IOException error) {
+      if(cancelled || !foreground) throw error;
+      status="服务器不可用，正在连接 GitHub…";
+      checkFrom(c,manual,client,installed,UpdateConfig.read(c).manifestUrl);
+    }
+  }
+  static void checkFrom(Context c, boolean manual, okhttp3.OkHttpClient client, PackageInfo installed,String manifestUrl) throws Exception {
     Release release;
-    okhttp3.Call manifestCall=client.newCall(new okhttp3.Request.Builder().url(UpdateConfig.read(c).manifestUrl).build());
-    manifestCall.timeout().timeout(30,TimeUnit.SECONDS);
+    okhttp3.Call manifestCall=client.newCall(new okhttp3.Request.Builder().url(manifestUrl).build());
+    manifestCall.timeout().timeout(10,TimeUnit.SECONDS);
     try (okhttp3.Response r = manifestCall.execute()) {
       if(r.code()==404) throw new UpdateFailure("暂未发布更新版本，请稍后再试");
-      if (!r.isSuccessful() || r.body() == null) throw new UpdateFailure("GitHub 请求失败（HTTP " + r.code() + "），请重试");
+      if (!r.isSuccessful() || r.body() == null) throw new UpdateFailure("更新源请求失败（HTTP " + r.code() + "），请重试");
       ByteArrayOutputStream manifest = new ByteArrayOutputStream();
       InputStream stream = r.body().byteStream(); byte[] block = new byte[8192]; int n;
       while ((n=stream.read(block))!=-1) {
@@ -167,7 +176,7 @@ final class AppUpdates {
       MessageDigest digest = MessageDigest.getInstance("SHA-256");
       long total = 0;
       try (okhttp3.Response r = client.newCall(new okhttp3.Request.Builder().url(release.url).build()).execute()) {
-        if (!r.isSuccessful() || r.body() == null) throw new UpdateFailure("GitHub 请求失败（HTTP " + r.code() + "），请重试");
+        if (!r.isSuccessful() || r.body() == null) throw new UpdateFailure("更新源请求失败（HTTP " + r.code() + "），请重试");
         try (InputStream in = r.body().byteStream(); FileOutputStream out = new FileOutputStream(partial)) {
           byte[] buffer = new byte[32768]; int count;
           while ((count = in.read(buffer)) != -1) {

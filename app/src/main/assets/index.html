@@ -21,14 +21,14 @@
       <div class="sheet-head"><div><h2 id="edit-title">记一笔</h2><p class="sheet-subtitle">记下生活里的每一笔</p></div><button type="button" id="cancel" class="text-button" autofocus>取消</button></div>
       <p id="draft-hint" class="draft-hint" hidden></p>
       <button type="button" id="draft-image" class="text-button draft-image" hidden>查看原截图</button>
-      <div class="amount-panel"><label for="amount">支出金额<span>人民币 CNY</span></label><div class="amount-input"><span aria-hidden="true">¥</span><input id="amount" type="text" inputmode="decimal" placeholder="0.00" required maxlength="120" enterkeyhint="done" aria-describedby="amount-hint" autocomplete="off"></div></div>
+      <div class="amount-panel"><label for="amount">金额<span>人民币 CNY</span></label><div class="amount-input"><span aria-hidden="true">¥</span><input id="amount" type="text" inputmode="decimal" placeholder="0.00" required maxlength="120" enterkeyhint="done" aria-describedby="amount-hint" autocomplete="off"></div></div>
       <div class="amount-calculator" role="group" aria-label="金额计算器"><button type="button" data-amount-key="+" aria-label="加">+</button><button type="button" data-amount-key="-" aria-label="减">−</button><button type="button" data-amount-key="*" aria-label="乘">×</button><button type="button" data-amount-key="/" aria-label="除">÷</button><button type="button" data-amount-key="(" aria-label="左括号">(</button><button type="button" data-amount-key=")" aria-label="右括号">)</button><button type="button" id="amount-equals" aria-label="计算金额">=</button></div>
       <p id="amount-hint" class="amount-hint">支持括号和四则运算 · 结果四舍五入到分</p>
       <p id="amount-error" class="error" role="status"></p>
-      <div id="owner-field"><div class="field-label" id="owner-label">这笔支出记给谁</div><input id="owner" type="hidden"><button id="owner-trigger" class="user-trigger" type="button" aria-labelledby="owner-label owner-name" aria-haspopup="listbox" aria-expanded="false" aria-controls="owner-menu"><span id="owner-name" class="user-trigger-text"></span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><div id="owner-menu" class="user-menu user-menu-list" role="listbox" aria-labelledby="owner-label" hidden></div></div>
-      <label class="field-label" for="at">支出日期</label><div class="date-input-row"><input id="at" type="text" inputmode="text" placeholder="YYYY-MM-DD" maxlength="10" required aria-describedby="date-hint"><button id="choose-date" class="secondary" type="button">滚动选择</button></div><p id="date-hint" class="date-hint">可手填年月日，例如 2026-10-20</p>
+      <div id="owner-field"><div class="field-label" id="owner-label">这笔记录记给谁</div><input id="owner" type="hidden"><button id="owner-trigger" class="user-trigger" type="button" aria-labelledby="owner-label owner-name" aria-haspopup="listbox" aria-expanded="false" aria-controls="owner-menu"><span id="owner-name" class="user-trigger-text"></span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><div id="owner-menu" class="user-menu user-menu-list" role="listbox" aria-labelledby="owner-label" hidden></div></div>
+      <label class="field-label" for="at">日期</label><div class="date-input-row"><input id="at" type="text" inputmode="text" placeholder="YYYY-MM-DD" maxlength="10" required aria-describedby="date-hint"><button id="choose-date" class="secondary" type="button">滚动选择</button></div><p id="date-hint" class="date-hint">可手填年月日，例如 2026-10-20</p>
       <div id="category-field" class="category-field">
-        <label class="field-label" id="category-label">支出属性</label>
+        <label class="field-label" id="category-label">账单属性</label>
         <input id="category" type="hidden" value="daily">
         <button id="category-trigger" type="button" aria-labelledby="category-label category-name" aria-haspopup="listbox" aria-expanded="false" aria-controls="category-menu">
           <span id="category-icon" class="category-icon" aria-hidden="true"></span><span id="category-name"></span>
@@ -39,7 +39,7 @@
       <label class="field-label" for="primary-note">一级备注<span class="optional">选填 · 可用于统计</span></label><input id="primary-note" maxlength="60" placeholder="例如：吃饭、交通、购物">
       <label class="field-label" for="note">二级备注<span class="optional">选填</span></label><input id="note" maxlength="200" placeholder="例如：牛肉面、咖啡、公交车">
       <p id="form-error" role="alert"></p>
-      <div class="editor-actions"><button class="primary" type="submit">保存这笔支出</button><button type="button" id="delete" class="danger">删除这笔记录</button><p class="save-hint">保存在手机 · 离线也能记账</p></div>
+      <div class="editor-actions"><button class="primary" type="submit">保存这笔记录</button><button type="button" id="delete" class="danger">删除这笔记录</button><p class="save-hint">保存在手机 · 离线也能记账</p></div>
     </form>
   </dialog>
   <div id="toast" role="status"></div>

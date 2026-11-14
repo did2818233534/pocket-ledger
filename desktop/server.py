@@ -303,6 +303,7 @@ class Store:
         if type(revision) is not int or not 0 <= revision < 2**53 - 1:
             raise ValueError("invalid revision")
         selective = data.get("protocol") == 4
+        cashflow = data.get("cashflow") == 1
         subscriptions = None
         if selective:
             ids = data["subscriptions"]
@@ -345,7 +346,7 @@ class Store:
             if type(amount) is not int or not 1 <= amount <= 99999999999:
                 raise ValueError("invalid amount")
             when = self.entry_date(when)
-            if e["category"] not in ("daily", "extra", "claim", "giving") or not isinstance(e["note"], str) or len(e["note"]) > 200:
+            if e["category"] not in (("daily", "extra", "claim", "giving", "income") if cashflow else ("daily", "extra", "claim", "giving")) or not isinstance(e["note"], str) or len(e["note"]) > 200:
                 raise ValueError("invalid details")
             if "primaryNote" in e and (not isinstance(e["primaryNote"], str) or len(e["primaryNote"]) > 60):
                 raise ValueError("invalid primary note")
@@ -402,11 +403,11 @@ class Store:
                 raise ValueError("user limit")
             stored["devices"] = [d for d in stored["devices"] if d["id"] != device] + [
                 {"id": device, "revision": revision, "updated": dt.datetime.now(dt.timezone.utc).isoformat()}]
-            result = {"protocol": 2, "revision": revision, "users": stored["users"], "records": stored["entries"]}
+            result = {"protocol": 2, "revision": revision, "users": stored["users"], "records": [e for e in stored["entries"] if cashflow or e["category"] != "income"]}
             if selective:
                 result.update(protocol=4,
                     users=[u for u in stored["users"] if u["id"] in subscriptions],
-                    records=[e for e in stored["entries"] if e["owner"] in subscriptions],
+                    records=[e for e in stored["entries"] if e["owner"] in subscriptions and (cashflow or e["category"] != "income")],
                     missingUsers=sorted(subscriptions - profiles.keys()),
                     outOfScope=[{k: e[k] for k in ("id", "version", "actor")}
                                 for e in stored["entries"] if e["id"] in seen and e["owner"] not in subscriptions])

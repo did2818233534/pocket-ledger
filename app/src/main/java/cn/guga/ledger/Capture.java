@@ -139,7 +139,7 @@ public final class Capture {
                 // Keep a private copy for checking the draft, then clear the bill out of the gallery.
                 if(automatic&&found&&cleanup(c)){String kept=keepCopy(c,id,uri);if(kept!=null){db.moveDraft(id,kept);deleteMedia(c,uri);}}
                 db.finishDraft(id,status,"error".equals(status)?"截图里没有找到金额":"",fields);
-                if("ready".equals(status))notifyDraft(c,db.draft(id));
+                if("ready".equals(status)||"income".equals(status))notifyDraft(c,db.draft(id));
             }catch(FileNotFoundException e){db.finishDraft(id,"error","截图已被删除",null);}
             catch(TooLarge e){db.finishDraft(id,"error","长截图太大，请分段截取",null);}
             catch(HttpStatus e){db.finishDraft(id,"error",e.code==401?"识别服务口令不对":"识别服务出错（"+e.code+"）",null);}
@@ -158,10 +158,11 @@ public final class Capture {
         JSONArray pending=db.drafts();int fresh=0,known=0;long total=0;
         for(int i=0;i<entries.length();i++){
             JSONObject f=entries.getJSONObject(i);long amount=f.optLong("amount");String date=str(f,"date"),time=str(f,"time");
-            String key=amount+"|"+date+"|"+(time.length()>=5?time.substring(0,5):time);
-            if(imported.contains(key)||added.contains(key)||(!date.isEmpty()&&db.hasEntry(amount,date))||waiting(pending,f)){known++;continue;}
+            boolean income="income".equals(str(f,"kind"));
+            String key=(income?"income|":"")+amount+"|"+date+"|"+(time.length()>=5?time.substring(0,5):time);
+            if(imported.contains(key)||added.contains(key)||(!date.isEmpty()&&db.hasEntry(amount,date,income))||waiting(pending,f)){known++;continue;}
             added.add(key);
-            if(db.addDraft(source+"#"+i,kept,app,takenAt,"ready",f)!=null){fresh++;total+=amount;}
+            if(db.addDraft(source+"#"+i,kept,app,takenAt,income?"income":"ready",f)!=null){fresh++;total+=amount;}
         }
         rememberKeys(c,imported,added);
         db.removeDraft(id);
@@ -175,7 +176,7 @@ public final class Capture {
         String date=str(f,"date"),time=str(f,"time");
         for(int i=0;i<drafts.length();i++){
             JSONObject other=drafts.optJSONObject(i),g=other==null?null:other.optJSONObject("fields");
-            if(g==null||g.optLong("amount",-1)!=f.optLong("amount",-2)||!str(g,"date").equals(date))continue;
+            if(g==null||!str(g,"kind").equals(str(f,"kind"))||g.optLong("amount",-1)!=f.optLong("amount",-2)||!str(g,"date").equals(date))continue;
             String when=str(g,"time");
             if(time.length()<5||when.length()<5||when.substring(0,5).equals(time.substring(0,5)))return true;
         }
@@ -196,7 +197,7 @@ public final class Capture {
     private static void notifyList(Context c,int added,long total,int known,int skipped){
         NotificationManager nm=c.getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel(CHANNEL,"截图记账",NotificationManager.IMPORTANCE_HIGH));
-        String title=added>0?String.format(Locale.ROOT,"账单截图里有 %d 笔新支出，共 ¥%.2f",added,total/100.0):"账单截图里没有新的支出";
+        String title=added>0?String.format(Locale.ROOT,"账单截图里有 %d 笔新收支",added):"账单截图里没有新的记录";
         List<String> parts=new ArrayList<>();
         if(known>0)parts.add(known+" 笔已记过或已导入");
         if(skipped>0)parts.add(skipped+" 笔收入、理财转账或已关闭的订单");
@@ -264,7 +265,7 @@ public final class Capture {
             JSONArray drafts=db.drafts();
             for(int i=0;i<drafts.length();i++){
                 JSONObject other=drafts.getJSONObject(i),g=other.getJSONObject("fields");
-                if(other.getString("id").equals(id)||g.optLong("amount",-1)!=f.optLong("amount",-2))continue;
+                if(other.getString("id").equals(id)||!str(g,"kind").equals(str(f,"kind"))||g.optLong("amount",-1)!=f.optLong("amount",-2))continue;
                 if(g.optString("date").equals(f.optString("date"))&&g.optString("time").equals(f.optString("time"))
                     &&g.optString("merchant").equals(f.optString("merchant")))return true;
             }
@@ -318,6 +319,7 @@ public final class Capture {
             conn.setRequestProperty("Content-Type","image/jpeg");
             String token=p.getString("token","");if(!token.isEmpty())conn.setRequestProperty("X-Token",token);
             if(day!=null)conn.setRequestProperty("X-Date",day);
+            conn.setRequestProperty("X-Cashflow","1");
             try(OutputStream out=conn.getOutputStream()){out.write(body);}
             if(conn.getResponseCode()!=200)throw new HttpStatus(conn.getResponseCode());
             try(InputStream in=conn.getInputStream()){return new JSONObject(new String(readAll(in,4<<20),StandardCharsets.UTF_8));}
@@ -350,10 +352,10 @@ public final class Capture {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent tap=PendingIntent.getActivity(c,id.hashCode(),open,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         // One-tap saving only when nothing needs checking: a CNY amount with no same-day expense of that amount.
-        boolean direct=cny(f)&&!LedgerDb.get(c).hasEntry(f.optLong("amount"),draftDate(draft));
+        boolean direct=cny(f)&&!LedgerDb.get(c).hasEntry(f.optLong("amount"),draftDate(draft),"income".equals(draft.optString("status")));
         String text=(merchant.isEmpty()?"":merchant+" · ")+(app.isEmpty()?"":app+" · ")+(direct?"点“记账”直接保存":"点按打开核对");
         Notification.Builder builder=new Notification.Builder(c,CHANNEL).setSmallIcon(R.drawable.ic_ledger)
-            .setContentTitle(String.format(Locale.ROOT,"识别到支出 ¥%.2f",f.optLong("amount")/100.0)).setContentText(text)
+            .setContentTitle(String.format(Locale.ROOT,"识别到%s ¥%.2f","income".equals(draft.optString("status"))?"收入":"支出",f.optLong("amount")/100.0)).setContentText(text)
             .setContentIntent(tap).setAutoCancel(true).setCategory(Notification.CATEGORY_REMINDER);
         if(direct)builder.addAction(new Notification.Action.Builder(null,"记账",action(c,id,SAVE_DRAFT)).build());
         builder.addAction(new Notification.Action.Builder(null,"忽略",action(c,id,DISMISS_DRAFT)).build());
@@ -370,12 +372,12 @@ public final class Capture {
         LedgerDb db=LedgerDb.get(c);JSONObject d=db.draft(id);
         if(d==null)return "这条识别记录已处理";
         JSONObject f=d.optJSONObject("fields");
-        if(!"ready".equals(d.optString("status"))||f==null||f.optLong("amount")<=0)return "这条记录需要打开核对";
+        if((!"ready".equals(d.optString("status"))&&!"income".equals(d.optString("status")))||f==null||f.optLong("amount")<=0)return "这条记录需要打开核对";
         if(!cny(f))return "外币账单请打开核对金额";
         String merchant=str(f,"merchant"),detail=str(f,"detail");
         String note=merchant.isEmpty()?detail:detail.isEmpty()?merchant:merchant+" · "+detail;
         try{
-            db.save(new JSONObject().put("amount",f.getLong("amount")).put("at",draftDate(d)).put("category","daily")
+            db.save(new JSONObject().put("amount",f.getLong("amount")).put("at",draftDate(d)).put("category","income".equals(d.optString("status"))?"income":"daily")
                 .put("primaryNote",clip(str(f,"primaryNote"),60)).put("note",clip(note,200)).toString());
         }catch(Exception e){return "保存失败";}
         forget(c,id);

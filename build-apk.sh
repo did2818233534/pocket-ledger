@@ -15,8 +15,8 @@ unzip -q -o build/tailscale/mobile.aar -d "$BUILD/mobile"
 "$TOOLS/aapt2" compile --dir app/src/main/res -o "$BUILD/resources.zip"
 sed 's/<manifest /<manifest package="cn.guga.ledger" /' app/src/main/AndroidManifest.xml > "$BUILD/AndroidManifest.xml"
 "$TOOLS/aapt2" link -I "$SDK/platforms/android-36/android.jar" \
-  --manifest "$BUILD/AndroidManifest.xml" --rename-manifest-package cn.guga.ledger \
-  --min-sdk-version 26 --target-sdk-version 36 --version-code 8 --version-name 1.4.3 \
+  --manifest "$BUILD/AndroidManifest.xml" --rename-manifest-package cn.guga.ledger.smart \
+  --min-sdk-version 26 --target-sdk-version 36 --version-code 11 --version-name 1.5.2 \
   --debug-mode --java "$BUILD/gen" -A app/src/main/assets \
   -o "$BUILD/resources.apk" "$BUILD/resources.zip"
 find app/src/main/java "$BUILD/gen" -name '*.java' > "$BUILD/sources.txt"
@@ -36,6 +36,6 @@ cp -r "$BUILD/mobile/jni/"* "$BUILD/native/lib/"
 "$TOOLS/zipalign" -f -P 16 4 "$BUILD/unsigned.apk" "$BUILD/aligned.apk"
 JAVA_HOME="$JDK" "$TOOLS/apksigner" sign --ks "${KEYSTORE:-/opt/android-user/debug.keystore}" \
   --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android \
-  --out "$PWD/dist/小账-1.4.3.apk" "$BUILD/aligned.apk"
-JAVA_HOME="$JDK" "$TOOLS/apksigner" verify "$PWD/dist/小账-1.4.3.apk"
-printf 'APK: %s/dist/小账-1.4.3.apk\n' "$PWD"
+  --out "$PWD/dist/小账智能版-1.5.2.apk" "$BUILD/aligned.apk"
+JAVA_HOME="$JDK" "$TOOLS/apksigner" verify "$PWD/dist/小账智能版-1.5.2.apk"
+printf 'APK: %s/dist/小账智能版-1.5.2.apk\n' "$PWD"

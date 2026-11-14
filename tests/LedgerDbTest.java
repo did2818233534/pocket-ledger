@@ -67,6 +67,15 @@ public final class LedgerDbTest {
             check(db.snapshot().getJSONArray("entries").length()==0,"late reply must not re-add removed user's entries");
             JSONObject moved=new JSONObject().put("protocol",5).put("users",new JSONArray()).put("records",new JSONArray()).put("outOfScope",new JSONArray().put(new JSONObject().put("id",row.getString("id")).put("version",remoteVersion+100).put("actor",fourth)));
             db.merge(moved);check(db.syncSnapshot().getJSONArray("records").length()==0,"ownership change out of scope removes cached row");
+            JSONObject bulkA=entry(owner),bulkB=entry(owner);db.save(bulkA.toString());db.save(bulkB.toString());
+            boolean badBatch=false;try{db.deleteMany(new JSONArray().put(bulkA.getString("id")).put(UUID.randomUUID().toString()));}catch(Exception expected){badBatch=true;}
+            check(badBatch&&db.snapshot().getJSONArray("entries").length()==2,"invalid batch must not delete any entry");
+            db.deleteMany(new JSONArray().put(bulkA.getString("id")).put(bulkB.getString("id")));
+            check(db.snapshot().getJSONArray("entries").length()==0,"batch deletes every selected entry");
+            JSONObject income=entry(owner).put("category","income");db.save(income.toString());
+            check(db.hasEntry(income.getLong("amount"),income.getString("at").substring(0,10),true),"income saved and detected");
+            check(!db.hasEntry(income.getLong("amount"),income.getString("at").substring(0,10),false),"expense duplicate must ignore income");
+            check(db.syncSnapshot().getInt("cashflow")==1,"income protocol capability sent");db.delete(income.getString("id"));
             JSONObject claim=entry(owner).put("category","claim");String claimId=claim.getString("id");db.save(claim.toString());
             check(!db.snapshot().getJSONArray("entries").getJSONObject(0).getBoolean("reimbursed"),"new claim starts pending");
             db.toggleReimbursed(claimId);check(db.snapshot().getJSONArray("entries").getJSONObject(0).getBoolean("reimbursed"),"claim can be reimbursed");

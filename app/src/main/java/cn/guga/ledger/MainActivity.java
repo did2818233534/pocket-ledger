@@ -73,7 +73,7 @@ public class MainActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient() {
             public boolean onJsConfirm(WebView view,String url,String message,JsResult result) {
                 new LedgerDialogBuilder(MainActivity.this).setMessage(message)
-                    .setPositiveButton(message.startsWith("确定删除") ? "删除" : message.startsWith("退出 Tailscale") ? "退出账号" : "放弃修改",(d,w)->result.confirm())
+                    .setPositiveButton((message.startsWith("确定删除")||message.startsWith("删除选中的")) ? "删除" : message.startsWith("退出 Tailscale") ? "退出账号" : message.contains("放弃修改") ? "放弃修改" : "确认",(d,w)->result.confirm())
                     .setNegativeButton("取消",(d,w)->result.cancel())
                     .setOnCancelListener(d->result.cancel()).show();
                 return true;
@@ -247,6 +247,7 @@ public class MainActivity extends Activity {
             try{LedgerDb.get(MainActivity.this).toggleReimbursed(id);autoSync();return "";}catch(Exception e){return "报销状态更新失败，请重试";}
         }
         @JavascriptInterface public void remove(String id) { LedgerDb.get(MainActivity.this).delete(id); autoSync(); }
+        @JavascriptInterface public String removeMany(String ids) { try { LedgerDb.get(MainActivity.this).deleteMany(new org.json.JSONArray(ids)); autoSync(); return ""; } catch(Exception e) { return "批量删除失败，账单可能已变化，请重新选择"; } }
         private void autoSync() {
             if (!getSharedPreferences("sync",0).getString("key","").isEmpty()) SyncService.requestQuietly(MainActivity.this);
         }
