@@ -1,10 +1,10 @@
-"""Screenshot OCR service for 小账 (RapidOCR / PP-OCR on CPU).
+"""Screenshot OCR service for 小账 (RapidOCR / PP-OCR on CPU, or an NVIDIA GPU with OCR_DEVICE=cuda).
 
 POST /parse  body = PNG/JPEG bytes -> {"fields": {...}, "lines": [...], "ms": int}
              a bill list (e.g. a long screenshot of 账单) also gets {"entries": [...], "skipped": n};
              optional header X-Date: YYYY-MM-DD (day the screenshot was taken) resolves 今天/昨天
 POST /ocr    body = PNG/JPEG bytes -> {"lines": [...], "ms": int}
-GET  /health                       -> {"ok": true}
+GET  /health                       -> {"ok": true}, plus "device": "cuda" on a GPU
 
 If OCR_TOKEN is set, POST requests must send the same value in the X-Token header.
 The service keeps no images or results.
@@ -31,11 +31,31 @@ TOKEN = os.environ.get("OCR_TOKEN", "")
 
 # Measured on a DXP2800 (Intel N100): capping the detector input at 736 px on the long side and
 # skipping the direction classifier keeps payment fields intact at ~1.5-3.5 s per screenshot.
-params = {"Det.limit_type": "max", "Det.limit_side_len": 736, "Global.use_cls": False}
+DEVICE = os.environ.get("OCR_DEVICE", "cpu")
+params = {"Det.limit_type": "max", "Det.limit_side_len": int(os.environ.get("OCR_DET_SIDE", "736")),
+          "Global.use_cls": False}
 if os.environ.get("OCR_THREADS"):
     # Cap onnxruntime's threads on a shared machine; by default it uses every physical core.
     params["EngineConfig.onnxruntime.intra_op_num_threads"] = int(os.environ["OCR_THREADS"])
+if os.environ.get("OCR_REC_BATCH"):
+    params["Rec.rec_batch_num"] = int(os.environ["OCR_REC_BATCH"])  # text lines per recognition call
+if DEVICE == "cuda":
+    import onnxruntime
+    if hasattr(onnxruntime, "preload_dlls"):
+        onnxruntime.preload_dlls()  # CUDA and cuDNN from the nvidia-* pip packages
+    params["EngineConfig.onnxruntime.use_cuda"] = True
+    # Every screenshot and text line has its own size, so an exhaustive cuDNN search would rerun for
+    # each new shape. "DEFAULT" is no cheaper choice: it skips the search and always uses one generic
+    # algorithm, 7x slower on an RTX 5070 Ti (34.6 vs 5.0 ms per batch of six lines).
+    params["EngineConfig.onnxruntime.cuda_ep_cfg.cudnn_conv_algo_search"] = "HEURISTIC"
 engine = RapidOCR(params=params)
+if DEVICE == "cuda":
+    # The first CUDA call loads kernels and picks cuDNN algorithms (about 1 s); pay it at startup,
+    # not on someone's screenshot.
+    warm = np.full((1600, 720, 3), 255, np.uint8)
+    for i in range(6):
+        cv2.putText(warm, f"Payment {i} -12.{i}0", (40, 150 + 230 * i), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 0), 3)
+    engine(warm)
 lock = threading.Lock()  # one inference at a time; onnxruntime already uses every core
 
 
@@ -90,8 +110,11 @@ class Handler(BaseHTTPRequestHandler):
             return datetime.now(timezone(timedelta(hours=8))).date()  # the users are in China
 
     def do_GET(self):
+        if self.path == "/health" and DEVICE != "cpu":
+            # Lets a reverse proxy or a person tell the GPU instance from the CPU fallback.
+            return self.reply(200, {"ok": True, "device": DEVICE})
         if self.path == "/health":
-            return self.reply(200, {"ok": True})
+            return self.reply(200, {"ok": True, "device": DEVICE})
         if re.fullmatch(r"/updates/(latest\.json|PocketLedgerSmart-[0-9.]+\.apk)", self.path):
             path = Path(os.environ.get("UPDATE_DIR", "/updates")) / self.path.rsplit("/", 1)[-1]
             try:
