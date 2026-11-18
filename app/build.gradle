@@ -6,8 +6,8 @@ android {
         applicationId 'cn.guga.ledger.smart'
         minSdk 26
         targetSdk 36
-        versionCode 11
-        versionName '1.5.2'
+        versionCode 12
+        versionName '1.5.3'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
@@ -15,3 +15,12 @@ android {
 dependencies { implementation files('../build/tailscale/mobile.aar') }
 
 dependencies { implementation fileTree(dir: 'libs', include: ['*.jar']) }
+
+// The application credential is injected locally, never committed to source control.
+tasks.named('preBuild').configure {
+    doFirst {
+        if (!file('src/main/assets/ocr-api.json').isFile()) {
+            throw new GradleException('Missing OCR API credential; see ocr/api/README.md')
+        }
+    }
+}

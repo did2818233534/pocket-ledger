@@ -38,6 +38,19 @@ public final class Capture {
     }
     private Capture(){}
 
+    private static final String BUILTIN_API="https://ocr.did2818233534.camdvr.org/v1";
+    static String serviceUrl(Context c){
+        String url=prefs(c).getString("url","").trim().replaceAll("/+$","");
+        if(url.isEmpty()||url.equals("https://ocr.did2818233534.camdvr.org"))return BUILTIN_API;
+        return url;
+    }
+    static String serviceToken(Context c) throws IOException {
+        if(!serviceUrl(c).equals(BUILTIN_API))return prefs(c).getString("token","");
+        try(InputStream in=c.getAssets().open("ocr-api.json")){
+            return new JSONObject(new String(readAll(in,4096),StandardCharsets.UTF_8)).getString("key");
+        }catch(JSONException e){throw new IOException("内置识别服务配置无效",e);}
+    }
+
     static SharedPreferences prefs(Context c){return c.getSharedPreferences(PREFS,0);}
     static boolean enabled(Context c){return prefs(c).getBoolean("enabled",false);}
     static String imagePermission(){return Build.VERSION.SDK_INT>=33?"android.permission.READ_MEDIA_IMAGES":"android.permission.READ_EXTERNAL_STORAGE";}
@@ -46,8 +59,8 @@ public final class Capture {
 
     static JSONObject state(Context c) throws JSONException {
         SharedPreferences p=prefs(c);
-        return new JSONObject().put("enabled",p.getBoolean("enabled",false)).put("url",p.getString("url",""))
-            .put("hasToken",!p.getString("token","").isEmpty()).put("allApps",p.getBoolean("allApps",false))
+        return new JSONObject().put("enabled",p.getBoolean("enabled",false)).put("url",serviceUrl(c))
+            .put("hasToken",serviceUrl(c).equals(BUILTIN_API)||!p.getString("token","").isEmpty()).put("allApps",p.getBoolean("allApps",false))
             .put("permission",canReadImages(c)).put("deleteAfter",p.getBoolean("deleteAfter",false)).put("canDelete",canDelete())
             .put("unrestricted",c.getSystemService(android.os.PowerManager.class).isIgnoringBatteryOptimizations(c.getPackageName()));
     }
@@ -59,6 +72,7 @@ public final class Capture {
 
     static String configure(Context c,boolean enable,String url,String token,boolean allApps,boolean deleteAfter){
         url=url.trim().replaceAll("/+$","");
+        if(url.isEmpty())url=BUILTIN_API;
         if(enable||!url.isEmpty()){
             try{URL u=new URL(url);if(!u.getProtocol().matches("https?")||u.getHost().isEmpty())throw new MalformedURLException();}
             catch(MalformedURLException e){return "请填写识别服务地址，例如 http://192.168.1.10:18086";}
@@ -142,7 +156,7 @@ public final class Capture {
                 if("ready".equals(status)||"income".equals(status))notifyDraft(c,db.draft(id));
             }catch(FileNotFoundException e){db.finishDraft(id,"error","截图已被删除",null);}
             catch(TooLarge e){db.finishDraft(id,"error","长截图太大，请分段截取",null);}
-            catch(HttpStatus e){db.finishDraft(id,"error",e.code==401?"识别服务口令不对":"识别服务出错（"+e.code+"）",null);}
+            catch(HttpStatus e){db.finishDraft(id,"error",e.code==401?"识别服务密钥无效或已停用":e.code==429?"识别额度已用完，请稍后再试":e.code==503?"识别服务繁忙，请稍后再试":"识别服务出错（"+e.code+"）",null);}
             catch(IOException e){db.finishDraft(id,"error","连不上识别服务，稍后自动重试",null);}
             catch(Exception e){db.finishDraft(id,"error","识别失败",null);}
         }
@@ -312,12 +326,17 @@ public final class Capture {
 
     static JSONObject post(Context c,String path,byte[] body) throws IOException, JSONException {return post(c,path,body,null);}
     static JSONObject post(Context c,String path,byte[] body,String day) throws IOException, JSONException {
-        SharedPreferences p=prefs(c);
-        HttpURLConnection conn=(HttpURLConnection)new URL(p.getString("url","")+path).openConnection();
+        String base=serviceUrl(c);
+        if(base.endsWith("/v1")&&path.equals("/parse"))path="/receipts/parse";
+        HttpURLConnection conn=(HttpURLConnection)new URL(base+path).openConnection();
+        conn.setInstanceFollowRedirects(false);
         try{
-            conn.setConnectTimeout(6000);conn.setReadTimeout(60000);conn.setDoOutput(true);conn.setFixedLengthStreamingMode(body.length);
+            conn.setConnectTimeout(6000);conn.setReadTimeout(150000);conn.setDoOutput(true);conn.setFixedLengthStreamingMode(body.length);
             conn.setRequestProperty("Content-Type","image/jpeg");
-            String token=p.getString("token","");if(!token.isEmpty())conn.setRequestProperty("X-Token",token);
+            String token=serviceToken(c);if(!token.isEmpty()){
+                if(base.endsWith("/v1"))conn.setRequestProperty("Authorization","Bearer "+token);
+                else conn.setRequestProperty("X-Token",token);
+            }
             if(day!=null)conn.setRequestProperty("X-Date",day);
             conn.setRequestProperty("X-Cashflow","1");
             try(OutputStream out=conn.getOutputStream()){out.write(body);}
@@ -329,7 +348,7 @@ public final class Capture {
     /** Returns "" when the service answers, otherwise a short reason. */
     static String health(Context c){
         try{
-            HttpURLConnection conn=(HttpURLConnection)new URL(prefs(c).getString("url","")+"/health").openConnection();
+            HttpURLConnection conn=(HttpURLConnection)new URL(serviceUrl(c)+"/health").openConnection();
             conn.setConnectTimeout(5000);conn.setReadTimeout(5000);
             try{return conn.getResponseCode()==200?"":"识别服务返回 "+conn.getResponseCode();}finally{conn.disconnect();}
         }catch(MalformedURLException e){return "请先填写识别服务地址";}

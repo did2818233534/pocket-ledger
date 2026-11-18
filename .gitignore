@@ -25,3 +25,6 @@ local.properties
 .env.*
 !.env.example
 .DS_Store
+
+# Injected OCR application credential; intentionally bundled in APK, never committed.
+app/src/main/assets/ocr-api.json

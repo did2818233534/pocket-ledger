@@ -1,9 +1,26 @@
 #!/usr/bin/env python3
-"""Generate the manifest beside the signed APK; publish both to the matching release."""
-import hashlib,json,sys
+"""Generate the update manifest from the current Android version and signed APK."""
+import argparse
+import hashlib
+import json
 from pathlib import Path
-apk=Path(sys.argv[1] if len(sys.argv)>1 else 'dist/小账-1.4.3.apk')
-content=apk.read_bytes()
+import re
 from urllib.parse import quote
-manifest={'schema':1,'versionCode':8,'versionName':'1.4.3','prerelease':False,'assets':{'arm64-v8a':{'url':'https://github.com/did2818233534/pocket-ledger/releases/download/v1.4.3/'+quote(apk.name),'sha256':hashlib.sha256(content).hexdigest(),'size':len(content)}}}
-path=apk.parent/'latest.json';path.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n');print(path)
+
+root = Path(__file__).resolve().parents[1]
+gradle = (root / 'app/build.gradle').read_text()
+version = re.search(r"versionName\s+'([^']+)'", gradle).group(1)
+code = int(re.search(r'versionCode\s+(\d+)', gradle).group(1))
+parser = argparse.ArgumentParser()
+parser.add_argument('apk', nargs='?', default=str(root / f'dist/PocketLedgerSmart-{version}.apk'))
+parser.add_argument('--base-url', default='https://ocr.did2818233534.camdvr.org/updates/')
+parser.add_argument('--output')
+args = parser.parse_args()
+apk = Path(args.apk)
+content = apk.read_bytes()
+manifest = {'schema': 1, 'versionCode': code, 'versionName': version, 'prerelease': False,
+            'assets': {'arm64-v8a': {'url': args.base_url.rstrip('/') + '/' + quote(apk.name),
+                                   'sha256': hashlib.sha256(content).hexdigest(), 'size': len(content)}}}
+path = Path(args.output) if args.output else apk.parent / 'latest.json'
+path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
+print(path)
