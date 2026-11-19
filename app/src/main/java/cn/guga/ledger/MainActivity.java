@@ -146,6 +146,15 @@ public class MainActivity extends Activity {
         });
     }
     class Bridge {
+        @JavascriptInterface public String statsPreferences() {
+            android.content.SharedPreferences p=getSharedPreferences("personalization",0);
+            try{return new JSONObject().put("month",p.getBoolean("month",false)).put("week",p.getBoolean("week",false)).toString();}
+            catch(Exception e){return "{}";}
+        }
+        @JavascriptInterface public void setStatsPeriodEnabled(String period,boolean enabled) {
+            if(period.equals("month")||period.equals("week"))getSharedPreferences("personalization",0).edit().putBoolean(period,enabled).apply();
+        }
+
         @JavascriptInterface public void chooseDate(String raw) {
             runOnUiThread(()->{
                 if(isFinishing()||isDestroyed())return;

@@ -111,3 +111,19 @@ test('cash-flow filters and net totals keep income positive and spending negativ
  assert.deepEqual(M.cashflowEntries(rows,'income'),[rows[1]]);
  assert.throws(()=>M.cashflowEntries(rows,'other'));
 });
+test('custom statistics include both endpoints, leap days, exclusions and cross-year drilldown',()=>{
+  const range={start:'2024-02-28',end:'2024-03-01'};
+  const rows=[{id:'a',at:'2024-02-28',amount:100,category:'daily',primaryNote:'吃饭'},
+    {id:'b',at:'2024-02-29',amount:200,category:'extra',primaryNote:'购物'},
+    {id:'c',at:'2024-03-01',amount:300,category:'daily',primaryNote:'吃饭'},
+    {id:'d',at:'2024-03-02',amount:999,category:'daily'},
+    {id:'e',at:'2024-02-29',amount:400,category:'claim',reimbursed:true}];
+  const r=M.reportData(rows,range,'primaryNote',['购物']);
+  assert.equal(r.summary.total,400);assert.equal(r.summary.count,2);
+  assert.deepEqual(r.summary.days.map(d=>d.amount),[100,0,300]);
+  assert.equal(M.filterEntries(M.statisticalEntries(rows),{...range,primaryNote:'吃饭'}).length,2);
+  assert.equal(M.stats([], {start:'2025-12-31',end:'2026-01-01'}).days.length,2);
+  assert.equal(M.stats(rows, {start:'2024-02-28',end:'2024-02-28'}).total,100);
+  assert.throws(()=>M.period({start:'2024-03-01',end:'2024-02-28'}));
+  assert.throws(()=>M.period({start:'2024-02-30',end:'2024-03-01'}));
+});
